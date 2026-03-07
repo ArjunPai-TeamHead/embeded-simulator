@@ -96,6 +96,29 @@ export const SimulatorCanvas = () => {
     initSimulator();
   }, [initSimulator]);
 
+  // Attach wheel listener as non-passive so preventDefault() works
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newZoom = Math.min(5, Math.max(0.1, zoomRef.current * factor));
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const worldX = (mx - panRef.current.x) / zoomRef.current;
+      const worldY = (my - panRef.current.y) / zoomRef.current;
+      const newPan = { x: mx - worldX * newZoom, y: my - worldY * newZoom };
+      zoomRef.current = newZoom;
+      panRef.current = newPan;
+      setZoom(newZoom);
+      setPan(newPan);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   // Recalculate wire positions after web components initialize their pinInfo
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -536,7 +559,6 @@ export const SimulatorCanvas = () => {
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={() => { isPanningRef.current = false; setPan({ ...panRef.current }); setDraggedComponentId(null); }}
-          onWheel={handleWheel}
           onContextMenu={(e) => e.preventDefault()}
           onClick={() => setSelectedComponentId(null)}
           style={{ cursor: isPanningRef.current ? 'grabbing' : wireInProgress ? 'crosshair' : 'default' }}
