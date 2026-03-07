@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:8001/api/auth/google/callback"
     FRONTEND_URL: str = "http://localhost:5173"
+    # Set to true in production (HTTPS). Controls the Secure flag on the JWT cookie.
+    COOKIE_SECURE: bool = False
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
