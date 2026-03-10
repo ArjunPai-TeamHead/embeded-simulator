@@ -48,7 +48,7 @@ export interface ImportResult {
   components: VelxioComponent[];
   wires: Wire[];
   files: Array<{ name: string; content: string }>;
-  /** Standard Arduino library names parsed from libraries.txt (Wokwi-only @wokwi: entries are excluded). */
+  /** Library names parsed from libraries.txt. Includes both standard Arduino Library Manager names and Wokwi-hosted entries in the form "LibName@wokwi:hash". */
   libraries: string[];
 }
 
@@ -137,14 +137,14 @@ function metadataIdToWokwiType(metadataId: string): string {
 /**
  * Parse the contents of a Wokwi libraries.txt file.
  * - Strips blank lines and # comments
- * - Excludes Wokwi-hosted entries in the form  name@wokwi:hash
- *   (they have no arduino-cli installable equivalent)
+ * - Includes Wokwi-hosted entries in the form  name@wokwi:hash
+ *   so the backend can download and install them from wokwi.com
  */
 export function parseLibrariesTxt(content: string): string[] {
   const libs: string[] = [];
   for (const raw of content.split('\n')) {
     const line = raw.trim();
-    if (!line || line.startsWith('#') || line.includes('@wokwi:')) continue;
+    if (!line || line.startsWith('#')) continue;
     libs.push(line);
   }
   return libs;

@@ -439,8 +439,13 @@ class ArduinoCLIService:
 
     async def install_library(self, library_name: str) -> dict:
         """
-        Install an Arduino library
+        Install an Arduino library.
+        Handles standard library names as well as Wokwi-hosted entries in
+        the form  "LibName@wokwi:projectHash".
         """
+        if '@wokwi:' in library_name:
+            return await self._install_wokwi_library(library_name)
+
         try:
             print(f"Installing library: {library_name}")
 
@@ -462,6 +467,115 @@ class ArduinoCLIService:
         except Exception as e:
             print(f"Exception installing library: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _install_wokwi_library(self, library_spec: str) -> dict:
+        """
+        Download and install a Wokwi-hosted library.
+
+        Wokwi stores custom libraries as projects.  The spec format is:
+            LibName@wokwi:projectHash
+        and the project ZIP is available at:
+            https://wokwi.com/api/projects/{projectHash}/zip
+
+        The ZIP is extracted into the Arduino user libraries directory so that
+        arduino-cli can find the headers during compilation.
+        """
+        import json as _json
+        import urllib.request
+        import urllib.error
+        import zipfile
+        import os
+        import shutil
+
+        parts = library_spec.split('@wokwi:', 1)
+        lib_name = parts[0].strip()
+        project_hash = parts[1].strip()
+        print(f"Installing Wokwi library: {lib_name} (project: {project_hash})")
+
+        # ── Locate the Arduino user libraries directory ────────────────────────
+        try:
+            def _get_config():
+                return subprocess.run(
+                    [self.cli_path, "config", "dump", "--format", "json"],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace'
+                )
+            cfg_result = await asyncio.to_thread(_get_config)
+            cfg = _json.loads(cfg_result.stdout)
+            config_dict = cfg.get("config", cfg)
+            dirs = config_dict.get("directories", {})
+            user_dir = dirs.get("user", "") or dirs.get("sketchbook", "")
+            if not user_dir:
+                return {"success": False, "error": "Could not determine Arduino user directory from config"}
+            lib_dir = Path(user_dir) / "libraries" / lib_name
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read arduino-cli config: {e}"}
+
+        # ── Download project ZIP ───────────────────────────────────────────────
+        url = f"https://wokwi.com/api/projects/{project_hash}/zip"
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp:
+                tmp_path = tmp.name
+
+            def _download():
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "velxio-arduino-emulator/1.0"},
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as resp, \
+                         open(tmp_path, 'wb') as out:
+                        out.write(resp.read())
+                except urllib.error.HTTPError as http_err:
+                    raise RuntimeError(
+                        f"Could not download Wokwi library '{lib_name}' "
+                        f"(HTTP {http_err.code}). "
+                        f"Wokwi-hosted libraries require the Wokwi platform and "
+                        f"cannot be installed automatically in a local environment."
+                    ) from http_err
+
+            await asyncio.to_thread(_download)
+
+            # ── Extract into the libraries directory ───────────────────────────
+            if lib_dir.exists():
+                shutil.rmtree(lib_dir)
+            lib_dir.mkdir(parents=True, exist_ok=True)
+
+            with zipfile.ZipFile(tmp_path, 'r') as zf:
+                for zi in zf.infolist():
+                    # Skip directories and Wokwi-specific files
+                    if zi.is_dir():
+                        continue
+                    fname = zi.filename
+                    basename = Path(fname).name
+                    if not basename or basename == 'wokwi-project.txt':
+                        continue
+                    # Flatten any subdirectory structure
+                    dest = lib_dir / basename
+                    dest.write_bytes(zf.read(fname))
+
+            # Create a minimal library.properties so arduino-cli recognises it
+            props = lib_dir / "library.properties"
+            if not props.exists():
+                props.write_text(
+                    f"name={lib_name}\nversion=1.0.0\nauthor=Wokwi\n"
+                    f"sentence=Wokwi-hosted library\nparagraph=\ncategory=Other\n"
+                    f"url=https://wokwi.com/projects/{project_hash}\n"
+                    f"architectures=*\n"
+                )
+
+            print(f"Installed Wokwi library {lib_name} to {lib_dir}")
+            return {"success": True, "stdout": f"Installed {lib_name} from Wokwi project {project_hash}"}
+
+        except Exception as e:
+            print(f"Error installing Wokwi library {lib_name}: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     async def list_installed_libraries(self) -> dict:
         """

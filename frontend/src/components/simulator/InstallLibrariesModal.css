@@ -179,6 +179,17 @@
   cursor: help;
 }
 
+.ilib-badge--wokwi {
+  color: #7dd3fc;
+  background: #0c2340;
+  border: 1px solid #1e4070;
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: default;
+}
+
 /* Spinner */
 .ilib-spinner {
   flex-shrink: 0;

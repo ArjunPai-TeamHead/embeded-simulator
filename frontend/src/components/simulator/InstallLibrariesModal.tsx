@@ -126,9 +126,20 @@ export const InstallLibrariesModal: React.FC<InstallLibrariesModalProps> = ({
 
         {/* Library list */}
         <div className="ilib-list">
-          {items.map((item) => (
+          {items.map((item) => {
+            // For Wokwi-hosted libraries ("LibName@wokwi:hash"), show only the LibName
+            const displayName = item.name.includes('@wokwi:')
+              ? item.name.split('@wokwi:')[0]
+              : item.name;
+            const isWokwiLib = item.name.includes('@wokwi:');
+            return (
             <div key={item.name} className={`ilib-item ilib-item--${item.status}`}>
-              <span className="ilib-item-name">{item.name}</span>
+              <span className="ilib-item-name">
+                {displayName}
+                {isWokwiLib && (
+                  <span className="ilib-badge ilib-badge--wokwi" title="Wokwi-hosted library">wokwi</span>
+                )}
+              </span>
               <span className="ilib-item-status">
                 {item.status === 'pending' && <span className="ilib-badge ilib-badge--pending">pending</span>}
                 {item.status === 'installing' && (
@@ -156,7 +167,8 @@ export const InstallLibrariesModal: React.FC<InstallLibrariesModalProps> = ({
                 )}
               </span>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Footer */}

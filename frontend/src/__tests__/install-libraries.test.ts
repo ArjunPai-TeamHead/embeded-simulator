@@ -98,11 +98,11 @@ describe('parseLibrariesTxt — unit', () => {
     expect(result).toEqual(['LibA', 'LibB', 'LibC']);
   });
 
-  it('excludes @wokwi: hash entries', () => {
+  it('includes @wokwi: hash entries (backend handles them)', () => {
     const result = parseLibrariesTxt(
-      'GoodLib\nBadLib@wokwi:abc123deadbeef\nAnotherGood\n',
+      'GoodLib\nWokwiLib@wokwi:abc123deadbeef\nAnotherGood\n',
     );
-    expect(result).toEqual(['GoodLib', 'AnotherGood']);
+    expect(result).toEqual(['GoodLib', 'WokwiLib@wokwi:abc123deadbeef', 'AnotherGood']);
   });
 
   it('handles inline whitespace (leading/trailing spaces on a line)', () => {
@@ -115,18 +115,18 @@ describe('parseLibrariesTxt — unit', () => {
     expect(result).toEqual(['Adafruit GFX Library', 'Adafruit SSD1306']);
   });
 
-  it('parses calculator-breakout-icon libraries.txt → only standard libs, no @wokwi:', () => {
+  it('parses calculator-breakout-icon libraries.txt → standard libs AND @wokwi: entries', () => {
     const result = parseLibrariesTxt(CALCULATOR_LIBRARIES_TXT);
     expect(result).toContain('Adafruit GFX Library');
     expect(result).toContain('Adafruit FT6206 Library');
     expect(result).toContain('Adafruit ILI9341');
     expect(result).toContain('SD');
     expect(result).toContain('Adafruit SSD1351 library');
-    // none of the @wokwi: entries
-    for (const entry of result) {
-      expect(entry).not.toContain('@wokwi:');
-    }
-    expect(result).toHaveLength(5);
+    // Wokwi-hosted entries must also be present
+    expect(result).toContain('LC_Adafruit_1947@wokwi:b065451f35dab6e1021d78f0f79b6eda6910455d');
+    expect(result).toContain('LC_baseTools@wokwi:95340986110645c1b45e55597a7caf4d023d4b4a');
+    // 5 standard + 10 @wokwi: entries visible in CALCULATOR_LIBRARIES_TXT snippet
+    expect(result.length).toBeGreaterThan(5);
   });
 
   it('parses ServoOverdone libraries.txt → [Servo]', () => {
@@ -153,13 +153,13 @@ describe('importFromWokwiZip — libraries field', () => {
     expect(result.libraries).toEqual(['Adafruit GFX Library', 'Adafruit SSD1306']);
   });
 
-  it('excludes @wokwi: entries from the returned array', async () => {
+  it('includes @wokwi: entries in the returned array (backend installs them)', async () => {
     const file = await makeZip({
       'sketch.ino': 'void setup(){}void loop(){}',
-      'libraries.txt': 'GoodLib\nBadLib@wokwi:deadbeef12345\n',
+      'libraries.txt': 'GoodLib\nWokwiLib@wokwi:deadbeef12345\n',
     });
     const result = await importFromWokwiZip(file);
-    expect(result.libraries).toEqual(['GoodLib']);
+    expect(result.libraries).toEqual(['GoodLib', 'WokwiLib@wokwi:deadbeef12345']);
   });
 
   it('returns empty array when libraries.txt is only comments', async () => {
@@ -180,16 +180,18 @@ describe('importFromWokwiZip — libraries field', () => {
     expect(result.libraries).toEqual(['Adafruit GFX Library', 'Adafruit SSD1306']);
   });
 
-  it('calculator ZIP — 5 standard libs, zero @wokwi: entries', async () => {
+  it('calculator ZIP — includes both standard libs AND @wokwi: entries', async () => {
     const file = await makeZip({
       'sketch.ino': 'void setup(){}void loop(){}',
       'libraries.txt': CALCULATOR_LIBRARIES_TXT,
     });
     const result = await importFromWokwiZip(file);
-    expect(result.libraries).toHaveLength(5);
-    for (const lib of result.libraries) {
-      expect(lib).not.toContain('@wokwi:');
-    }
+    // 5 standard Arduino Library Manager libs
+    expect(result.libraries).toContain('Adafruit GFX Library');
+    expect(result.libraries).toContain('SD');
+    // Wokwi-hosted libs must also be present
+    expect(result.libraries).toContain('LC_Adafruit_1947@wokwi:b065451f35dab6e1021d78f0f79b6eda6910455d');
+    expect(result.libraries.length).toBeGreaterThan(5);
   });
 
   it('libraries field does not interfere with files[], components[], wires[]', async () => {
