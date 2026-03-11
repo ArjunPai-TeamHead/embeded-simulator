@@ -197,6 +197,20 @@
   padding: 16px 20px 0;
 }
 
+.docs-sidebar-divider {
+  margin: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.docs-sidebar-title--pages {
+  padding-top: 0;
+}
+
+.docs-sidebar-link {
+  display: block;
+  text-decoration: none;
+}
+
 .docs-sidebar-gh {
   display: flex;
   align-items: center;

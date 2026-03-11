@@ -420,6 +420,7 @@ export const LandingPage: React.FC = () => {
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="nav-link">
             <IcoGitHub /> GitHub
           </a>
+          <Link to="/docs" className="nav-link">Docs</Link>
           <Link to="/examples" className="nav-link">Examples</Link>
           {isLoading ? (
             <div className="nav-auth-skeleton" />
@@ -564,6 +565,7 @@ export const LandingPage: React.FC = () => {
         </div>
         <div className="footer-links">
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <Link to="/docs">Docs</Link>
           <Link to="/examples">Examples</Link>
           <Link to="/editor">Editor</Link>
         </div>

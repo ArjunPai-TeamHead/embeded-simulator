@@ -478,6 +478,7 @@ export const DocsPage: React.FC = () => {
         <span className="docs-nav-divider">/</span>
         <span className="docs-nav-section">Docs</span>
         <div className="docs-nav-links">
+          <Link to="/" className="docs-nav-link">Home</Link>
           <Link to="/examples" className="docs-nav-link">Examples</Link>
           <Link to="/editor" className="docs-nav-link">Editor</Link>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="docs-nav-link">
@@ -516,6 +517,13 @@ export const DocsPage: React.FC = () => {
                 {item.label}
               </button>
             ))}
+          </nav>
+          <div className="docs-sidebar-divider" />
+          <div className="docs-sidebar-title docs-sidebar-title--pages">Pages</div>
+          <nav className="docs-sidebar-nav">
+            <Link to="/" className="docs-sidebar-item docs-sidebar-link" onClick={() => setSidebarOpen(false)}>Home</Link>
+            <Link to="/editor" className="docs-sidebar-item docs-sidebar-link" onClick={() => setSidebarOpen(false)}>Editor</Link>
+            <Link to="/examples" className="docs-sidebar-item docs-sidebar-link" onClick={() => setSidebarOpen(false)}>Examples</Link>
           </nav>
           <div className="docs-sidebar-footer">
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="docs-sidebar-gh">
