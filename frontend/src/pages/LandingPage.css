@@ -505,6 +505,49 @@
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
+/* Wokwi element board wrappers */
+/* Elements have fixed mm dimensions; we scale them to fit the card.
+   At 96dpi: Uno ≈274×202px, Nano ≈170×67px, Mega ≈388×192px.
+   transform: scale() is visual only, so wrapper clips to the scaled size. */
+.board-element-wrap {
+  overflow: hidden;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+  flex-shrink: 0;
+}
+
+/* Uno: 274×202px → scale 0.73 → 200×147px */
+.board-element-uno {
+  width: 200px;
+  height: 147px;
+}
+.board-element-uno > wokwi-arduino-uno {
+  display: block;
+  transform: scale(0.73);
+  transform-origin: top left;
+}
+
+/* Nano: 170×67px → scale 1.18 → 200×79px */
+.board-element-nano {
+  width: 200px;
+  height: 79px;
+}
+.board-element-nano > wokwi-arduino-nano {
+  display: block;
+  transform: scale(1.18);
+  transform-origin: top left;
+}
+
+/* Mega: 388×192px → scale 0.515 → 200×99px */
+.board-element-mega {
+  width: 200px;
+  height: 99px;
+}
+.board-element-mega > wokwi-arduino-mega {
+  display: block;
+  transform: scale(0.515);
+  transform-origin: top left;
+}
+
 .board-info {
   display: flex;
   flex-direction: column;
