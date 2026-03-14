@@ -150,19 +150,19 @@ class EspQemuManager:
 
         qemu_bin, machine = _MACHINE[inst.board_type]
 
-        # Allocate TCP ports
+        # Allocate TCP port for UART0 serial
         inst.serial_port = _find_free_port()
-        inst.gpio_port   = _find_free_port()
 
         # Build QEMU command
+        # Note: Espressif QEMU v9.x uses server=on,wait=off syntax
+        # GPIO chardev (lcgamboa fork) is not available in the Espressif pre-built binary;
+        # serial I/O via TCP is fully functional.
         cmd = [
             qemu_bin,
             '-nographic',
             '-machine', machine,
             # UART0 → TCP (serial I/O)
-            '-serial', f'tcp:127.0.0.1:{inst.serial_port},server,nowait',
-            # GPIO chardev → TCP
-            '-chardev', f'socket,id=gpio0,host=127.0.0.1,port={inst.gpio_port},server,nowait',
+            '-serial', f'tcp:127.0.0.1:{inst.serial_port},server=on,wait=off',
         ]
 
         if firmware_path:
@@ -185,11 +185,10 @@ class EspQemuManager:
         inst.running = True
         await inst.emit('system', {'event': 'booting'})
 
-        # Give QEMU a moment to open its TCP sockets
+        # Give QEMU a moment to open its TCP socket
         await asyncio.sleep(1.0)
 
         inst._tasks.append(asyncio.create_task(self._connect_serial(inst)))
-        inst._tasks.append(asyncio.create_task(self._connect_gpio(inst)))
         inst._tasks.append(asyncio.create_task(self._watch_stderr(inst)))
 
     # ── Serial (UART0) ─────────────────────────────────────────────────────────

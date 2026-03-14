@@ -429,7 +429,14 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       const board = get().boards.find((b) => b.id === boardId);
       if (!board) return;
 
-      if (board.boardKind !== 'raspberry-pi-3' && !isEsp32Kind(board.boardKind)) {
+      if (isEsp32Kind(board.boardKind)) {
+        // Reset ESP32: disconnect then reconnect the QEMU bridge
+        const esp32Bridge = getEsp32Bridge(boardId);
+        if (esp32Bridge?.connected) {
+          esp32Bridge.disconnect();
+          setTimeout(() => esp32Bridge.connect(), 500);
+        }
+      } else if (board.boardKind !== 'raspberry-pi-3') {
         const sim = getBoardSimulator(boardId);
         if (sim) {
           sim.reset();
@@ -861,6 +868,11 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
           for (let i = 0; i < text.length; i++) {
             bridge.sendSerialByte(text.charCodeAt(i));
           }
+        }
+      } else if (isEsp32Kind(board.boardKind)) {
+        const esp32Bridge = getEsp32Bridge(boardId);
+        if (esp32Bridge) {
+          esp32Bridge.sendSerialBytes(Array.from(new TextEncoder().encode(text)));
         }
       } else {
         getBoardSimulator(boardId)?.serialWrite(text);

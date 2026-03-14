@@ -133,8 +133,11 @@ export const SimulatorCanvas = () => {
   const startBoard = useSimulatorStore((s) => s.startBoard);
   const stopBoard = useSimulatorStore((s) => s.stopBoard);
   useEffect(() => {
-    const piBoards = boards.filter((b) => b.boardKind === 'raspberry-pi-3');
-    piBoards.forEach((b) => {
+    const remoteBoards = boards.filter(
+      (b) => b.boardKind === 'raspberry-pi-3' ||
+             b.boardKind === 'esp32' || b.boardKind === 'esp32-s3' || b.boardKind === 'esp32-c3'
+    );
+    remoteBoards.forEach((b) => {
       if (running && !b.running) startBoard(b.id);
       else if (!running && b.running) stopBoard(b.id);
     });
