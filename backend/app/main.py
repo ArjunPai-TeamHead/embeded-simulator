@@ -1,7 +1,14 @@
 import logging
+import sys
+import asyncio
 from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
+
+# On Windows, asyncio defaults to SelectorEventLoop which does NOT support
+# create_subprocess_exec (raises NotImplementedError). Force ProactorEventLoop.
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

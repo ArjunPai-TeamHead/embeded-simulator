@@ -686,12 +686,18 @@ export const SimulatorCanvas = () => {
         Math.pow(e.clientY - clickStartPos.y, 2)
       );
 
-      if (posDiff < 5 && timeDiff < 300 && draggedComponentId !== '__board__') {
-        const component = components.find((c) => c.id === draggedComponentId);
-        if (component) {
-          setPropertyDialogComponentId(draggedComponentId);
-          setPropertyDialogPosition({ x: component.x, y: component.y });
-          setShowPropertyDialog(true);
+      if (posDiff < 5 && timeDiff < 300) {
+        if (draggedComponentId.startsWith('__board__:')) {
+          // Click on a board — make it the active board (editor switches to its code)
+          const boardId = draggedComponentId.slice('__board__:'.length);
+          useSimulatorStore.getState().setActiveBoardId(boardId);
+        } else if (draggedComponentId !== '__board__') {
+          const component = components.find((c) => c.id === draggedComponentId);
+          if (component) {
+            setPropertyDialogComponentId(draggedComponentId);
+            setPropertyDialogPosition({ x: component.x, y: component.y });
+            setShowPropertyDialog(true);
+          }
         }
       }
 
@@ -1098,8 +1104,11 @@ export const SimulatorCanvas = () => {
                 key={board.id}
                 board={board}
                 running={running}
+                isActive={board.id === activeBoardId}
                 led13={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
                 onMouseDown={(e) => {
+                  setClickStartTime(Date.now());
+                  setClickStartPos({ x: e.clientX, y: e.clientY });
                   const world = toWorld(e.clientX, e.clientY);
                   setDraggedComponentId(`__board__:${board.id}`);
                   setDragOffset({ x: world.x - board.x, y: world.y - board.y });

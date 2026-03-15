@@ -37,10 +37,18 @@ export const PinOverlay: React.FC<PinOverlayProps> = ({
   const [pins, setPins] = useState<PinInfo[]>([]);
 
   useEffect(() => {
-    // Get pin info from wokwi-element
-    const element = document.getElementById(componentId);
-    if (element && (element as any).pinInfo) {
-      setPins((element as any).pinInfo);
+    const tryRead = () => {
+      const element = document.getElementById(componentId);
+      if (element && (element as any).pinInfo) {
+        setPins((element as any).pinInfo);
+        return true;
+      }
+      return false;
+    };
+    if (!tryRead()) {
+      // Retry once after a tick in case the element sets pinInfo asynchronously (e.g. via useEffect)
+      const t = setTimeout(tryRead, 50);
+      return () => clearTimeout(t);
     }
   }, [componentId]);
 

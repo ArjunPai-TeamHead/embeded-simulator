@@ -4,14 +4,33 @@
  * Collection of example projects that users can load and run
  */
 
+/** Per-board setup for multi-board examples */
+export interface ExampleBoard {
+  /** Must match a BoardKind — determines the board instance ID (first board of a kind → boardKind string) */
+  boardKind: string;
+  x: number;
+  y: number;
+  /** Arduino/firmware code loaded into this board's file group */
+  code?: string;
+  /** Files pre-loaded into the Pi VFS (path → content). Only used for raspberry-pi-3. */
+  vfsFiles?: Record<string, string>;
+}
+
 export interface ExampleProject {
   id: string;
   title: string;
   description: string;
   category: 'basics' | 'sensors' | 'displays' | 'communication' | 'games' | 'robotics';
   difficulty: 'beginner' | 'intermediate' | 'advanced';
-  /** Target board — defaults to 'arduino-uno' if omitted */
+  /** Target board — defaults to 'arduino-uno' if omitted. Ignored when boards[] is set. */
   boardType?: 'arduino-uno' | 'arduino-nano' | 'raspberry-pi-pico' | 'esp32';
+  /**
+   * Multi-board setup. When present, ALL boards are replaced with these entries.
+   * Board instance IDs are deterministic: first board of a kind uses boardKind as its ID.
+   * Wire componentIds reference these IDs directly.
+   */
+  boards?: ExampleBoard[];
+  /** Code for single-board examples (ignored when boards[] is set) */
   code: string;
   components: Array<{
     type: string;
@@ -2030,6 +2049,153 @@ void loop() {
 }`,
     components: [],
     wires: [],
+  },
+
+  // ── Multi-board example ──────────────────────────────────────────────────
+
+  {
+    id: 'pi-to-arduino-led-control',
+    title: '[Pi + Arduino] Serial LED Control',
+    description: 'Raspberry Pi 3B controls two LEDs on an Arduino Uno via UART serial. Pi sends commands (LED1_ON, LED2_ON…) from a Python script; Arduino parses them and drives the LEDs.',
+    category: 'communication',
+    difficulty: 'advanced',
+    code: '',   // unused — each board has its own code in boards[]
+    boards: [
+      {
+        boardKind: 'raspberry-pi-3',
+        x: 80,
+        y: 80,
+        vfsFiles: {
+          'script.py': `#!/usr/bin/env python3
+# Pi -> Arduino Serial LED Controller
+# ------------------------------------
+# Wiring (real hardware):
+#   Pi GPIO14 (TX) --> Arduino pin 0 (RX)
+#   Pi GPIO15 (RX) <-- Arduino pin 1 (TX)
+#   Pi GND         --- Arduino GND
+#
+# How to run in the emulator:
+#   1. Start the Pi  ("Start Pi" button)
+#   2. Compile & Run the Arduino sketch
+#   3. Click Upload in the File System panel
+#   4. Run: python3 /home/pi/script.py
+import time
+
+try:
+    import serial
+    port = serial.Serial('/dev/ttyAMA0', baudrate=9600, timeout=1)
+    def send_cmd(cmd):
+        port.write((cmd + '\\n').encode())
+        time.sleep(0.2)
+        resp = port.readline().decode(errors='replace').strip()
+        if resp:
+            print("  Arduino:", resp)
+    def cleanup(): port.close()
+except ImportError:
+    def send_cmd(cmd):
+        print("  [demo] ->", cmd)
+        time.sleep(0.5)
+    def cleanup(): pass
+
+print("=== Pi LED Controller ===")
+time.sleep(1)
+
+steps = [
+    ("LED1_ON",  "Red LED ON"),
+    ("ALL_OFF",  "All LEDs OFF"),
+    ("LED2_ON",  "Green LED ON"),
+    ("ALL_OFF",  "All LEDs OFF"),
+    ("ALL_ON",   "Both LEDs ON"),
+    ("ALL_OFF",  "All LEDs OFF"),
+]
+
+for cmd, label in steps:
+    print(label)
+    send_cmd(cmd)
+    time.sleep(1)
+
+print("Done!")
+cleanup()
+`,
+        },
+      },
+      {
+        boardKind: 'arduino-uno',
+        x: 560,
+        y: 80,
+        code: `// Pi -> Arduino Serial LED Control
+// Listens on hardware Serial (pins 0/1, 9600 baud) for commands
+// sent by the Raspberry Pi Python script.
+//
+// Commands:
+//   LED1_ON  / LED1_OFF  - Red LED  (pin 8)
+//   LED2_ON  / LED2_OFF  - Green LED (pin 9)
+//   ALL_ON   / ALL_OFF   - Both LEDs
+
+const int LED1 = 8;   // Red
+const int LED2 = 9;   // Green
+
+String buf = "";
+
+void setup() {
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  Serial.begin(9600);
+  Serial.println("Arduino ready — waiting for Pi commands...");
+}
+
+void loop() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\\n') {
+      buf.trim();
+      processCommand(buf);
+      buf = "";
+    } else {
+      buf += c;
+    }
+  }
+}
+
+void processCommand(const String& cmd) {
+  if      (cmd == "LED1_ON")  { digitalWrite(LED1, HIGH); Serial.println("LED1: ON");  }
+  else if (cmd == "LED1_OFF") { digitalWrite(LED1, LOW);  Serial.println("LED1: OFF"); }
+  else if (cmd == "LED2_ON")  { digitalWrite(LED2, HIGH); Serial.println("LED2: ON");  }
+  else if (cmd == "LED2_OFF") { digitalWrite(LED2, LOW);  Serial.println("LED2: OFF"); }
+  else if (cmd == "ALL_ON")   { digitalWrite(LED1, HIGH); digitalWrite(LED2, HIGH); Serial.println("Both: ON");  }
+  else if (cmd == "ALL_OFF")  { digitalWrite(LED1, LOW);  digitalWrite(LED2, LOW);  Serial.println("Both: OFF"); }
+  else if (cmd.length() > 0)  { Serial.print("Unknown: "); Serial.println(cmd); }
+}
+`,
+      },
+    ],
+    components: [
+      // Red LED + 220Ω resistor for LED1 (Arduino pin 8)
+      { type: 'wokwi-led',      id: 'led1',  x: 840, y: 100, properties: { color: 'red'   } },
+      { type: 'wokwi-resistor', id: 'res1',  x: 840, y: 200, properties: { resistance: '220' } },
+      // Green LED + 220Ω resistor for LED2 (Arduino pin 9)
+      { type: 'wokwi-led',      id: 'led2',  x: 840, y: 320, properties: { color: 'green' } },
+      { type: 'wokwi-resistor', id: 'res2',  x: 840, y: 420, properties: { resistance: '220' } },
+    ],
+    wires: [
+      // ── Serial UART cross-connection ──────────────────────────────────────
+      // Pi GPIO14 (TX) → Arduino pin 0 (RX)
+      { id: 'w-uart-tx', start: { componentId: 'raspberry-pi-3', pinName: 'GPIO14' }, end: { componentId: 'arduino-uno', pinName: '0' }, color: '#ff8800' },
+      // Arduino pin 1 (TX) → Pi GPIO15 (RX)
+      { id: 'w-uart-rx', start: { componentId: 'arduino-uno', pinName: '1' }, end: { componentId: 'raspberry-pi-3', pinName: 'GPIO15' }, color: '#00aaff' },
+      // Common GND
+      { id: 'w-gnd', start: { componentId: 'raspberry-pi-3', pinName: 'GND' }, end: { componentId: 'arduino-uno', pinName: 'GND' }, color: '#000000' },
+
+      // ── LED 1 (Red) — Arduino pin 8 → res1 → led1 → GND ─────────────────
+      { id: 'w-led1-sig', start: { componentId: 'arduino-uno', pinName: '8' },  end: { componentId: 'res1', pinName: '1' }, color: '#ff2222' },
+      { id: 'w-led1-mid', start: { componentId: 'res1', pinName: '2' },          end: { componentId: 'led1', pinName: 'A'  }, color: '#ff2222' },
+      { id: 'w-led1-gnd', start: { componentId: 'led1', pinName: 'C' },          end: { componentId: 'arduino-uno', pinName: 'GND' }, color: '#000000' },
+
+      // ── LED 2 (Green) — Arduino pin 9 → res2 → led2 → GND ───────────────
+      { id: 'w-led2-sig', start: { componentId: 'arduino-uno', pinName: '9' },  end: { componentId: 'res2', pinName: '1' }, color: '#22cc22' },
+      { id: 'w-led2-mid', start: { componentId: 'res2', pinName: '2' },          end: { componentId: 'led2', pinName: 'A'  }, color: '#22cc22' },
+      { id: 'w-led2-gnd', start: { componentId: 'led2', pinName: 'C' },          end: { componentId: 'arduino-uno', pinName: 'GND' }, color: '#000000' },
+    ],
   },
 ];
 

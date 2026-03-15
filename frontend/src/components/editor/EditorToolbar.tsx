@@ -1,8 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
 import { useEditorStore } from '../../store/useEditorStore';
 import { useSimulatorStore } from '../../store/useSimulatorStore';
+import type { BoardKind } from '../../types/board';
 import { BOARD_KIND_FQBN, BOARD_KIND_LABELS } from '../../types/board';
 import { compileCode } from '../../services/compilation';
+import { CompileAllProgress } from './CompileAllProgress';
+import type { BoardCompileStatus } from './CompileAllProgress';
 import { LibraryManagerModal } from '../simulator/LibraryManagerModal';
 import { InstallLibrariesModal } from '../simulator/InstallLibrariesModal';
 import { parseCompileResult } from '../../utils/compilationLogger';
@@ -16,6 +19,28 @@ interface EditorToolbarProps {
   compileLogs: CompilationLog[];
   setCompileLogs: (logs: CompilationLog[] | ((prev: CompilationLog[]) => CompilationLog[])) => void;
 }
+
+const BOARD_PILL_ICON: Record<BoardKind, string> = {
+  'arduino-uno':       '⬤',
+  'arduino-nano':      '▪',
+  'arduino-mega':      '▬',
+  'raspberry-pi-pico': '◆',
+  'raspberry-pi-3':    '⬛',
+  'esp32':    '⬡',
+  'esp32-s3': '⬡',
+  'esp32-c3': '⬡',
+};
+
+const BOARD_PILL_COLOR: Record<BoardKind, string> = {
+  'arduino-uno':       '#4fc3f7',
+  'arduino-nano':      '#4fc3f7',
+  'arduino-mega':      '#4fc3f7',
+  'raspberry-pi-pico': '#ce93d8',
+  'raspberry-pi-3':    '#ef9a9a',
+  'esp32':    '#a5d6a7',
+  'esp32-s3': '#a5d6a7',
+  'esp32-c3': '#a5d6a7',
+};
 
 export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compileLogs, setCompileLogs }: EditorToolbarProps) => {
   const { files } = useEditorStore();
@@ -41,6 +66,11 @@ export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compi
   const [pendingLibraries, setPendingLibraries] = useState<string[]>([]);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Compile All state
+  const [compileAllOpen, setCompileAllOpen] = useState(false);
+  const [compileAllRunning, setCompileAllRunning] = useState(false);
+  const [compileAllStatuses, setCompileAllStatuses] = useState<BoardCompileStatus[]>([]);
 
   const addLog = useCallback((log: CompilationLog) => {
     setCompileLogs((prev: CompilationLog[]) => [...prev, log]);
@@ -129,6 +159,68 @@ export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compi
     setMessage(null);
   };
 
+  const handleCompileAll = async () => {
+    const boardsList = useSimulatorStore.getState().boards;
+    const initialStatuses: BoardCompileStatus[] = boardsList.map((b) => ({
+      boardId: b.id,
+      boardKind: b.boardKind,
+      state: 'pending',
+    }));
+    setCompileAllStatuses(initialStatuses);
+    setCompileAllOpen(true);
+    setCompileAllRunning(true);
+
+    for (const board of boardsList) {
+      const updateStatus = (patch: Partial<BoardCompileStatus>) =>
+        setCompileAllStatuses((prev) => prev.map((s) => s.boardId === board.id ? { ...s, ...patch } : s));
+
+      // Pi 3 doesn't need compilation
+      if (board.boardKind === 'raspberry-pi-3') {
+        updateStatus({ state: 'skipped' });
+        continue;
+      }
+
+      const fqbn = BOARD_KIND_FQBN[board.boardKind];
+      if (!fqbn) {
+        updateStatus({ state: 'error', error: `No FQBN configured for ${board.boardKind}` });
+        continue;
+      }
+
+      updateStatus({ state: 'compiling' });
+
+      try {
+        const groupFiles = useEditorStore.getState().getGroupFiles(board.activeFileGroupId);
+        const sketchFiles = groupFiles.map((f) => ({ name: f.name, content: f.content }));
+        const result = await compileCode(sketchFiles, fqbn);
+
+        if (result.success) {
+          const program = result.hex_content ?? result.binary_content ?? null;
+          if (program) compileBoardProgram(board.id, program);
+          updateStatus({ state: 'success' });
+        } else {
+          updateStatus({ state: 'error', error: result.stderr || result.error || 'Compilation failed' });
+        }
+      } catch (err) {
+        updateStatus({ state: 'error', error: err instanceof Error ? err.message : String(err) });
+      }
+      // Always continue to next board
+    }
+
+    setCompileAllRunning(false);
+  };
+
+  const handleRunAll = () => {
+    const boardsList = useSimulatorStore.getState().boards;
+    for (const board of boardsList) {
+      const isQemu = board.boardKind === 'raspberry-pi-3' ||
+        board.boardKind === 'esp32' || board.boardKind === 'esp32-s3' || board.boardKind === 'esp32-c3';
+      if (!board.running && (isQemu || board.compiledProgram)) {
+        startBoard(board.id);
+      }
+    }
+    setCompileAllOpen(false);
+  };
+
   const handleExport = async () => {
     try {
       const { components, wires, boardPosition, boardType: legacyBoardType } = useSimulatorStore.getState();
@@ -166,7 +258,30 @@ export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compi
 
   return (
     <>
+      <div className="editor-toolbar-wrapper" style={{ position: 'relative' }}>
+        {/* Compile All progress panel — floats above the toolbar */}
+        {compileAllOpen && (
+          <CompileAllProgress
+            statuses={compileAllStatuses}
+            isRunning={compileAllRunning}
+            onRunAll={handleRunAll}
+            onClose={() => setCompileAllOpen(false)}
+          />
+        )}
       <div className="editor-toolbar">
+        {/* Active board context pill */}
+        {activeBoard && (
+          <div
+            className="tb-board-pill"
+            style={{ borderColor: BOARD_PILL_COLOR[activeBoard.boardKind], color: BOARD_PILL_COLOR[activeBoard.boardKind] }}
+            title={`Editing: ${BOARD_KIND_LABELS[activeBoard.boardKind]}`}
+          >
+            <span className="tb-board-pill-icon">{BOARD_PILL_ICON[activeBoard.boardKind]}</span>
+            <span className="tb-board-pill-label">{BOARD_KIND_LABELS[activeBoard.boardKind]}</span>
+            {activeBoard.running && <span className="tb-board-pill-running" title="Running" />}
+          </div>
+        )}
+
         <div className="toolbar-group">
           {/* Compile */}
           <button
@@ -224,6 +339,38 @@ export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compi
               <path d="M3 3v5h5" />
             </svg>
           </button>
+
+          {boards.length > 1 && (
+            <>
+              <div className="tb-divider" />
+
+              {/* Compile All */}
+              <button
+                onClick={handleCompileAll}
+                disabled={compileAllRunning}
+                className="tb-btn tb-btn-compile-all"
+                title="Compile all boards"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                  <path d="M6 20h4M14 4l4 4" strokeDasharray="2 2" />
+                </svg>
+              </button>
+
+              {/* Run All */}
+              <button
+                onClick={handleRunAll}
+                disabled={running}
+                className="tb-btn tb-btn-run-all"
+                title="Run all boards"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <polygon points="3,3 11,12 3,21" />
+                  <polygon points="13,3 21,12 13,21" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
 
         <div className="toolbar-group toolbar-group-right">
@@ -305,6 +452,7 @@ export const EditorToolbar = ({ consoleOpen, setConsoleOpen, compileLogs: _compi
             </svg>
           </button>
         </div>
+      </div>
       </div>
 
       {/* Error detail bar */}

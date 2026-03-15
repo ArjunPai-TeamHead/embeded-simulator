@@ -11,6 +11,7 @@ import { useOscilloscopeStore } from './useOscilloscopeStore';
 import { RaspberryPi3Bridge } from '../simulation/RaspberryPi3Bridge';
 import { Esp32Bridge } from '../simulation/Esp32Bridge';
 import { useEditorStore } from './useEditorStore';
+import { useVfsStore } from './useVfsStore';
 
 // ── Legacy type aliases (keep external consumers working) ──────────────────
 export type BoardType = 'arduino-uno' | 'arduino-nano' | 'arduino-mega' | 'raspberry-pi-pico';
@@ -139,7 +140,9 @@ interface SimulatorState {
   // ── Serial monitor ──────────────────────────────────────────────────────
   toggleSerialMonitor: () => void;
   serialWrite: (text: string) => void;
+  serialWriteToBoard: (boardId: string, text: string) => void;
   clearSerialOutput: () => void;
+  clearBoardSerialOutput: (boardId: string) => void;
 }
 
 // ── Helper: create a simulator for a given board kind ─────────────────────
@@ -218,6 +221,15 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
     },
     getOscilloscopeCallback(),
   );
+  // Cross-board serial bridge for the initial board: AVR TX → Pi bridges RX
+  const initialOrigSerial = initialSim.onSerialData;
+  initialSim.onSerialData = (ch: string) => {
+    initialOrigSerial?.(ch);
+    get().boards.forEach((b) => {
+      const bridge = bridgeMap.get(b.id);
+      if (bridge) bridge.sendSerialBytes([ch.charCodeAt(0)]);
+    });
+  };
   simulatorMap.set(INITIAL_BOARD_ID, initialSim);
 
   // ── Legacy single-board PinManager (references initial board's pm) ───────
@@ -249,7 +261,14 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
       if (boardKind === 'raspberry-pi-3') {
         const bridge = new RaspberryPi3Bridge(id);
-        bridge.onSerialData = serialCallback;
+        bridge.onSerialData = (ch: string) => {
+          serialCallback(ch);
+          // Cross-board serial bridge: Pi TX → all AVR simulators RX
+          get().boards.forEach((b) => {
+            const sim = simulatorMap.get(b.id);
+            if (sim instanceof AVRSimulator) sim.serialWrite(ch);
+          });
+        };
         bridge.onPinChange = (_gpioPin, _state) => {
           // Cross-board routing handled in SimulatorCanvas
         };
@@ -300,6 +319,15 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
           },
           getOscilloscopeCallback(),
         );
+        // Cross-board serial bridge: AVR TX → all Pi bridges RX
+        const origSerial = sim.onSerialData;
+        sim.onSerialData = (ch: string) => {
+          origSerial?.(ch);
+          get().boards.forEach((b) => {
+            const bridge = bridgeMap.get(b.id);
+            if (bridge) bridge.sendSerialBytes([ch.charCodeAt(0)]);
+          });
+        };
         simulatorMap.set(id, sim);
       }
 
@@ -314,6 +342,10 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       set((s) => ({ boards: [...s.boards, newBoard] }));
       // Create the editor file group for this board
       useEditorStore.getState().createFileGroup(`group-${id}`);
+      // Init VFS for Raspberry Pi 3 boards
+      if (boardKind === 'raspberry-pi-3') {
+        useVfsStore.getState().initBoardVfs(id);
+      }
       return id;
     },
 
@@ -960,6 +992,34 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       const boardId = activeBoardId ?? INITIAL_BOARD_ID;
       set((s) => ({
         serialOutput: '',
+        boards: s.boards.map((b) => b.id === boardId ? { ...b, serialOutput: '' } : b),
+      }));
+    },
+
+    serialWriteToBoard: (boardId: string, text: string) => {
+      const board = get().boards.find((b) => b.id === boardId);
+      if (!board) return;
+      if (board.boardKind === 'raspberry-pi-3') {
+        const bridge = getBoardBridge(boardId);
+        if (bridge) {
+          for (let i = 0; i < text.length; i++) {
+            bridge.sendSerialByte(text.charCodeAt(i));
+          }
+        }
+      } else if (isEsp32Kind(board.boardKind)) {
+        const esp32Bridge = getEsp32Bridge(boardId);
+        if (esp32Bridge) {
+          esp32Bridge.sendSerialBytes(Array.from(new TextEncoder().encode(text)));
+        }
+      } else {
+        getBoardSimulator(boardId)?.serialWrite(text);
+      }
+    },
+
+    clearBoardSerialOutput: (boardId: string) => {
+      const isActive = get().activeBoardId === boardId;
+      set((s) => ({
+        ...(isActive ? { serialOutput: '' } : {}),
         boards: s.boards.map((b) => b.id === boardId ? { ...b, serialOutput: '' } : b),
       }));
     },

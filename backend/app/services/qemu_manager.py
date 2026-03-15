@@ -49,7 +49,7 @@ class PiInstance:
         self.callback  = callback
 
         # Runtime state
-        self.process:      asyncio.subprocess.Process | None = None
+        self.process:      subprocess.Popen | None = None
         self.overlay_path: str | None = None
         self.serial_port:  int = 0   # ttyAMA0 TCP port
         self.gpio_port:    int = 0   # ttyAMA1 TCP port
@@ -123,6 +123,11 @@ class QemuManager:
                  inst.overlay_path],
                 check=True, capture_output=True,
             )
+            # raspi3b requires SD card size to be a power of 2; resize overlay to 8 GiB
+            subprocess.run(
+                ['qemu-img', 'resize', inst.overlay_path, '8G'],
+                check=True, capture_output=True,
+            )
         except subprocess.CalledProcessError as e:
             await inst.emit('error', {'message': f'qemu-img create failed: {e.stderr.decode()}'})
             self._instances.pop(inst.client_id, None)
@@ -143,18 +148,24 @@ class QemuManager:
             # ttyAMA1 → GPIO shim protocol
             '-serial', f'tcp:127.0.0.1:{inst.gpio_port},server,nowait',
             '-append',
-            'console=ttyAMA0 root=/dev/mmcblk0p2 rootwait '
+            'console=ttyAMA0 root=/dev/mmcblk0p2 rootwait rw '
             'dwc_otg.lpm_enable=0 quiet init=/bin/sh',
         ]
 
         logger.info('Launching QEMU for %s: %s', inst.client_id, ' '.join(cmd))
 
+        # Use subprocess.Popen via executor — asyncio.create_subprocess_exec requires
+        # ProactorEventLoop on Windows but uvicorn may use SelectorEventLoop.
+        loop = asyncio.get_running_loop()
         try:
-            inst.process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,
+            inst.process = await loop.run_in_executor(
+                None,
+                lambda: subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
+                ),
             )
         except FileNotFoundError:
             await inst.emit('error', {'message': 'qemu-system-aarch64 not found in PATH'})
@@ -261,11 +272,16 @@ class QemuManager:
     async def _watch_stderr(self, inst: PiInstance) -> None:
         if not inst.process or not inst.process.stderr:
             return
+        loop = asyncio.get_running_loop()
         try:
-            async for line in inst.process.stderr:
+            while inst.running:
+                # readline() blocks until a line or EOF — run in executor so we don't block the loop
+                line = await loop.run_in_executor(None, inst.process.stderr.readline)
+                if not line:
+                    break
                 text = line.decode('utf-8', errors='replace').rstrip()
                 if text:
-                    logger.debug('QEMU[%s] %s', inst.client_id, text)
+                    logger.warning('QEMU[%s] %s', inst.client_id, text)
         except Exception:
             pass
         logger.info('QEMU[%s] process exited', inst.client_id)
@@ -296,9 +312,13 @@ class QemuManager:
             inst._serial_writer = None
 
         if inst.process:
+            loop = asyncio.get_running_loop()
             try:
                 inst.process.terminate()
-                await asyncio.wait_for(inst.process.wait(), timeout=5.0)
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, inst.process.wait),
+                    timeout=5.0,
+                )
             except Exception:
                 try:
                     inst.process.kill()

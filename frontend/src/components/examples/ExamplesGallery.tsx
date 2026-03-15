@@ -206,7 +206,20 @@ export const ExamplesGallery: React.FC<ExamplesGalleryProps> = ({ onLoadExample 
                 <span className="example-category">
                   {getCategoryIcon(example.category)} {example.category}
                 </span>
-                {example.boardType === 'raspberry-pi-pico' && (
+                {example.boards && (
+                  <span className="example-board-badge" style={{
+                    backgroundColor: '#ef9a9a22',
+                    color: '#ef9a9a',
+                    border: '1px solid #ef9a9a55',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                  }}>
+                    Multi-Board
+                  </span>
+                )}
+                {!example.boards && example.boardType === 'raspberry-pi-pico' && (
                   <span className="example-board-badge" style={{
                     backgroundColor: '#e91e8c',
                     color: '#fff',
@@ -218,7 +231,7 @@ export const ExamplesGallery: React.FC<ExamplesGalleryProps> = ({ onLoadExample 
                     Pico
                   </span>
                 )}
-                {example.boardType === 'esp32' && (
+                {!example.boards && example.boardType === 'esp32' && (
                   <span className="example-board-badge" style={{
                     backgroundColor: '#e77d11',
                     color: '#fff',

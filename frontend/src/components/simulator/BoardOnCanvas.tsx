@@ -15,7 +15,7 @@ const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'arduino-nano':      { w: 175, h:  70 },
   'arduino-mega':      { w: 530, h: 195 },
   'raspberry-pi-pico': { w: 280, h: 180 },
-  'raspberry-pi-3':    { w: 250, h: 160 },
+  'raspberry-pi-3':    { w: 320, h: 205 },
   'esp32':    { w: 141, h: 265 },  // esp32-devkit-v1: 28.2 × 53 mm
   'esp32-s3': { w: 128, h: 350 },  // esp32-s3-devkitc-1: 25.5 × 70 mm
   'esp32-c3': { w: 127, h: 215 },  // esp32-c3-devkitm-1: 25.4 × 42.9 mm
@@ -25,6 +25,7 @@ interface BoardOnCanvasProps {
   board: BoardInstance;
   running: boolean;
   led13?: boolean;
+  isActive?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onPinClick: (componentId: string, pinName: string, x: number, y: number) => void;
 }
@@ -33,11 +34,19 @@ export const BoardOnCanvas = ({
   board,
   running,
   led13 = false,
+  isActive = false,
   onMouseDown,
   onPinClick,
 }: BoardOnCanvasProps) => {
   const { id, boardKind, x, y } = board;
   const size = BOARD_SIZE[boardKind] ?? { w: 300, h: 200 };
+
+  // Status dot color: green=running, amber=compiled, gray=idle
+  const statusColor = board.running
+    ? '#22c55e'
+    : board.compiledProgram
+    ? '#f59e0b'
+    : '#6b7280';
 
   const boardEl = (() => {
     switch (boardKind) {
@@ -61,6 +70,41 @@ export const BoardOnCanvas = ({
   return (
     <>
       {boardEl}
+
+      {/* Active board highlight ring */}
+      {isActive && (
+        <div
+          style={{
+            position: 'absolute',
+            left: x - 3,
+            top: y - 3,
+            width: size.w + 6,
+            height: size.h + 6,
+            border: '2px solid #007acc',
+            borderRadius: 6,
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+      )}
+
+      {/* Status dot — top-right corner */}
+      <div
+        style={{
+          position: 'absolute',
+          left: x + size.w - 10,
+          top: y - 6,
+          width: 12,
+          height: 12,
+          borderRadius: '50%',
+          background: statusColor,
+          border: '2px solid #1e1e1e',
+          pointerEvents: 'none',
+          zIndex: 10,
+          transition: 'background 0.3s',
+        }}
+        title={board.running ? 'Running' : board.compiledProgram ? 'Compiled' : 'Idle'}
+      />
 
       {/* Drag overlay — hidden during simulation */}
       {!running && (
