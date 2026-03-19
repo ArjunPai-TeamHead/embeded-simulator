@@ -146,7 +146,7 @@ export const BOARD_COMPONENT_IDS = [
   'esp32', 'esp32-devkit-c-v4', 'esp32-cam', 'wemos-lolin32-lite',
   'esp32-s3', 'xiao-esp32-s3', 'arduino-nano-esp32',
   'esp32-c3', 'xiao-esp32-c3', 'aitewinrobot-esp32c3-supermini',
-  'attiny85', 'riscv-generic',
+  'attiny85',
 ];
 
 /**

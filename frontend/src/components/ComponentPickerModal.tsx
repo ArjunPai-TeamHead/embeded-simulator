@@ -16,7 +16,6 @@ import type { BoardKind } from '../types/board';
 import { BOARD_KIND_LABELS } from '../types/board';
 import raspberryPi3Svg from '../assets/Raspberry_Pi_3_illustration.svg';
 import { Attiny85 } from './components-wokwi/Attiny85';
-import { RiscVBoard } from './components-wokwi/RiscVBoard';
 import './components-wokwi/Esp32Element';        // registers wokwi-esp32
 import './components-wokwi/PiPicoWElement';      // registers wokwi-pi-pico-w
 import './ComponentPickerModal.css';
@@ -46,19 +45,6 @@ const BOARD_DESCRIPTIONS: Record<BoardKind, string> = {
   'xiao-esp32-c3':      'Seeed XIAO ESP32-C3 mini board (QEMU)',
   'aitewinrobot-esp32c3-supermini': 'ESP32-C3 SuperMini (QEMU)',
   'attiny85':           '8-bit AVR, 8KB flash, 6 GPIO (browser)',
-  'riscv-generic':      'RV32EC 48 MHz, 16KB flash, CH32V003 (browser)',
-};
-
-const BOARD_COLOR: Record<BoardKind, string> = {
-  'arduino-uno': '#4af', 'arduino-nano': '#4af', 'arduino-mega': '#4af',
-  'raspberry-pi-pico': '#4af', 'pi-pico-w': '#4af',
-  'raspberry-pi-3': '#c22',
-  'esp32': '#e8a020', 'esp32-devkit-c-v4': '#e8a020', 'esp32-cam': '#e8a020',
-  'wemos-lolin32-lite': '#e8a020',
-  'esp32-s3': '#e8a020', 'xiao-esp32-s3': '#e8a020', 'arduino-nano-esp32': '#4af',
-  'esp32-c3': '#e8a020', 'xiao-esp32-c3': '#e8a020',
-  'aitewinrobot-esp32c3-supermini': '#e8a020',
-  'attiny85': '#4af', 'riscv-generic': '#4a4',
 };
 
 const ALL_BOARDS: BoardKind[] = [
@@ -67,7 +53,7 @@ const ALL_BOARDS: BoardKind[] = [
   'esp32', 'esp32-devkit-c-v4', 'esp32-cam', 'wemos-lolin32-lite',
   'esp32-s3', 'xiao-esp32-s3', 'arduino-nano-esp32',
   'esp32-c3', 'xiao-esp32-c3', 'aitewinrobot-esp32c3-supermini',
-  'attiny85', 'riscv-generic',
+  'attiny85',
 ];
 
 export const ComponentPickerModal: React.FC<ComponentPickerModalProps> = ({
@@ -365,7 +351,7 @@ const BoardCard: React.FC<BoardCardProps> = ({ kind, onSelect }) => {
   React.useEffect(() => {
     if (!thumbnailRef.current) return;
     // React-rendered boards and Pi3 handled in JSX below
-    if (kind === 'raspberry-pi-3' || kind === 'attiny85' || kind === 'riscv-generic') return;
+    if (kind === 'raspberry-pi-3' || kind === 'attiny85') return;
 
     const tag = BOARD_TAG[kind];
     if (!tag) return;
@@ -388,10 +374,6 @@ const BoardCard: React.FC<BoardCardProps> = ({ kind, onSelect }) => {
     ) : kind === 'attiny85' ? (
       <div style={{ transform: 'scale(0.55)', transformOrigin: 'center center' }}>
         <Attiny85 />
-      </div>
-    ) : kind === 'riscv-generic' ? (
-      <div style={{ transform: 'scale(0.42)', transformOrigin: 'center center' }}>
-        <RiscVBoard />
       </div>
     ) : null;
 

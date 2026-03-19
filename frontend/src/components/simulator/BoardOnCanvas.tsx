@@ -7,7 +7,6 @@ import { NanoRP2040 } from '../components-wokwi/NanoRP2040';
 import { RaspberryPi3 } from '../components-wokwi/RaspberryPi3';
 import { Esp32 } from '../components-wokwi/Esp32';
 import { Attiny85 } from '../components-wokwi/Attiny85';
-import { RiscVBoard } from '../components-wokwi/RiscVBoard';
 import { PiPicoW } from '../components-wokwi/PiPicoW';
 import { PinOverlay } from './PinOverlay';
 
@@ -32,7 +31,6 @@ const BOARD_SIZE: Record<string, { w: number; h: number }> = {
   'xiao-esp32-c3':      { w:  91, h: 117 },
   'aitewinrobot-esp32c3-supermini': { w: 90, h: 123 },
   'attiny85':      { w: 160, h: 100 },
-  'riscv-generic': { w: 200, h: 140 },
 };
 
 interface BoardOnCanvasProps {
@@ -89,8 +87,6 @@ export const BoardOnCanvas = ({
         return <Esp32 id={id} x={x} y={y} boardKind={boardKind} />;
       case 'attiny85':
         return <Attiny85 id={id} x={x} y={y} led1={led13} />;
-      case 'riscv-generic':
-        return <RiscVBoard id={id} x={x} y={y} ledBuiltIn={led13} />;
     }
   })();
 

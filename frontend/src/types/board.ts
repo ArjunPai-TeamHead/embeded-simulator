@@ -15,8 +15,7 @@ export type BoardKind =
   | 'esp32-c3'                    // RISC-V RV32IMC, browser emulation (Esp32C3Simulator)
   | 'xiao-esp32-c3'               // Seeed XIAO ESP32-C3, browser emulation (Esp32C3Simulator)
   | 'aitewinrobot-esp32c3-supermini' // ESP32-C3 SuperMini, browser emulation (Esp32C3Simulator)
-  | 'attiny85'                    // AVR ATtiny85, browser emulation (avr8js)
-  | 'riscv-generic';              // RV32I generic MCU (CH32V003 target), browser emulation
+  | 'attiny85';                   // AVR ATtiny85, browser emulation (avr8js)
 
 export interface BoardInstance {
   id: string;                   // unique in canvas, e.g. 'arduino-uno', 'raspberry-pi-3'
@@ -49,7 +48,6 @@ export const BOARD_KIND_LABELS: Record<BoardKind, string> = {
   'xiao-esp32-c3':  'XIAO ESP32-C3',
   'aitewinrobot-esp32c3-supermini': 'ESP32-C3 SuperMini',
   'attiny85':       'ATtiny85',
-  'riscv-generic':  'RISC-V RV32 (CH32V003)',
 };
 
 export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
@@ -70,5 +68,4 @@ export const BOARD_KIND_FQBN: Record<BoardKind, string | null> = {
   'xiao-esp32-c3':  'esp32:esp32:XIAO_ESP32C3',
   'aitewinrobot-esp32c3-supermini': 'esp32:esp32:esp32c3',
   'attiny85':       'ATTinyCore:avr:attinyx5:chip=85,clock=internal16mhz',
-  'riscv-generic':  null,
 };

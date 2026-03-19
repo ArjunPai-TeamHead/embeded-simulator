@@ -66,8 +66,6 @@ function getPinsForBoardKind(boardKind: BoardKind): { pin: number; label: string
     case 'xiao-esp32-c3':
     case 'aitewinrobot-esp32c3-supermini':
       return Array.from({ length: 22 }, (_, i) => ({ pin: i, label: `GPIO${i}` }));
-    case 'riscv-generic':
-      return Array.from({ length: 20 }, (_, i) => ({ pin: i, label: `D${i}` }));
     case 'raspberry-pi-3':
       return Array.from({ length: 28 }, (_, i) => ({ pin: i, label: `GPIO${i}` }));
     default:

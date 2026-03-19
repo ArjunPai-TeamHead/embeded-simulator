@@ -176,8 +176,6 @@ function createSimulator(
     sim = new AVRSimulator(pm, 'mega');
   } else if (boardKind === 'attiny85') {
     sim = new AVRSimulator(pm, 'tiny85');
-  } else if (boardKind === 'riscv-generic') {
-    sim = new RiscVSimulator(pm);
   } else if (boardKind === 'raspberry-pi-pico' || boardKind === 'pi-pico-w') {
     sim = new RP2040Simulator(pm);
   } else if (isRiscVEsp32Kind(boardKind)) {
