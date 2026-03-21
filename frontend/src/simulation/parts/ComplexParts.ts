@@ -283,6 +283,13 @@ PartSimulationRegistry.register('servo', {
             let riseTimeMs = -1;
             let logCount = 0;
 
+            // Self-calibrating pulse range: the PIO clock divider may not match
+            // exactly, producing pulses offset from the standard 544-2400µs range.
+            // Track the minimum observed pulse (= 0° reference) and map using the
+            // known standard spread (MAX_PULSE_US - MIN_PULSE_US = 1856µs).
+            let observedMin = Infinity;
+            const EXPECTED_SPREAD = MAX_PULSE_US - MIN_PULSE_US; // 1856
+
             avrSimulator.onPinChangeWithTime = (pin, state, timeMs) => {
                 if (pin !== pinSIG) return;
                 if (logCount < 10) {
@@ -294,14 +301,32 @@ PartSimulationRegistry.register('servo', {
                 } else if (riseTimeMs >= 0) {
                     const pulseUs = (timeMs - riseTimeMs) * 1000;
                     riseTimeMs = -1;
+
+                    // Reject noise: only consider pulses in a reasonable servo range
+                    if (pulseUs < 100 || pulseUs > 25000) return;
+
                     if (logCount <= 12) {
-                        console.log(`[Servo RP2040] pulseUs=${pulseUs.toFixed(1)}`);
+                        console.log(`[Servo RP2040] pulseUs=${pulseUs.toFixed(1)} observedMin=${observedMin.toFixed(1)}`);
                     }
+
+                    // Update calibration baseline
+                    if (pulseUs < observedMin) observedMin = pulseUs;
+
+                    // Try standard range first
                     if (pulseUs >= MIN_PULSE_US && pulseUs <= MAX_PULSE_US) {
                         const angle = Math.round(
-                            ((pulseUs - MIN_PULSE_US) / (MAX_PULSE_US - MIN_PULSE_US)) * 180
+                            ((pulseUs - MIN_PULSE_US) / EXPECTED_SPREAD) * 180
                         );
-                        el.angle = angle;
+                        el.angle = Math.max(0, Math.min(180, angle));
+                    } else if (observedMin < Infinity) {
+                        // Self-calibrated range: use observedMin as 0° reference
+                        const rangeMax = observedMin + EXPECTED_SPREAD;
+                        if (pulseUs >= observedMin - 50 && pulseUs <= rangeMax + 200) {
+                            const angle = Math.round(
+                                ((pulseUs - observedMin) / EXPECTED_SPREAD) * 180
+                            );
+                            el.angle = Math.max(0, Math.min(180, angle));
+                        }
                     }
                 }
             };

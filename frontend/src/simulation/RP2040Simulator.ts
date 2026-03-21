@@ -294,13 +294,26 @@ export class RP2040Simulator {
                 this.stepPIO();
                 break;
               }
-              clock.tick(jump);
               const jumped = Math.ceil(jump / CYCLE_NANOS);
-              cyclesDone += jumped;
-              this.totalCycles += jumped;
-              // Step PIO proportionally during the jump
               const pioSteps = Math.floor(jumped / pioDiv);
-              for (let i = 0; i < pioSteps && i < 2000; i++) this.stepPIO();
+              // Advance clock incrementally per PIO step so GPIO transitions
+              // get accurate timestamps (not all lumped at the end of the jump).
+              const nanoPerPioStep = pioDiv * CYCLE_NANOS;
+              const maxSteps = Math.min(pioSteps, 50000);
+              let nanosStepped = 0;
+              for (let i = 0; i < maxSteps; i++) {
+                clock.tick(nanoPerPioStep);
+                nanosStepped += nanoPerPioStep;
+                this.totalCycles += pioDiv;
+                this.stepPIO();
+              }
+              // Tick any remaining nanoseconds not covered by PIO steps
+              const remaining = jump - nanosStepped;
+              if (remaining > 0) {
+                clock.tick(remaining);
+                this.totalCycles += Math.ceil(remaining / CYCLE_NANOS);
+              }
+              cyclesDone += jumped;
               this.flushScheduledPinChanges();
             } else {
               break;
@@ -312,7 +325,7 @@ export class RP2040Simulator {
             this.totalCycles += cycles;
             // Step PIO synchronously at the PIO clock rate
             this.pioStepAccum += cycles;
-            if (this.pioStepAccum >= pioDiv) {
+            while (this.pioStepAccum >= pioDiv) {
               this.pioStepAccum -= pioDiv;
               this.stepPIO();
             }
@@ -323,20 +336,31 @@ export class RP2040Simulator {
         frameCount++;
         if (frameCount % 60 === 0) {
           console.log(`[RP2040] Frame ${frameCount}, PC: 0x${core.PC.toString(16)}`);
-          // PIO diagnostic: check GPIO 15 state and PIO status
+          // PIO diagnostic: check GPIO 15 state and PIO1 status (servo uses PIO1)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const rp = this.rp2040 as any;
           if (rp && frameCount <= 300) {
             const gpio15 = rp.gpio[15];
-            const pio0 = rp.pio[0];
+            const pio1 = rp.pio[1];
             const funcSel = gpio15 ? (gpio15.ctrl & 0x1f) : -1;
-            const pioStopped = pio0 ? pio0.stopped : true;
-            const pioPinVal = pio0 ? ((pio0.pinValues >> 15) & 1) : -1;
-            const pioPinDir = pio0 ? ((pio0.pinDirections >> 15) & 1) : -1;
+            const pio1Stopped = pio1 ? pio1.stopped : true;
+            const pio1PinVal = pio1 ? ((pio1.pinValues >> 15) & 1) : -1;
+            const pio1PinDir = pio1 ? ((pio1.pinDirections >> 15) & 1) : -1;
+            // Find clockDivInt for first enabled machine in PIO1
+            let pio1ClkDiv = 'N/A';
+            if (pio1?.machines) {
+              for (const m of pio1.machines) {
+                if (m.enabled) {
+                  pio1ClkDiv = `${m.clockDivInt}.${m.clockDivFrac || 0}`;
+                  break;
+                }
+              }
+            }
             console.log(
-              `[RP2040 PIO diag] gpio15.funcSel=${funcSel} (6=PIO0)` +
-              ` pio0.stopped=${pioStopped} pinVal[15]=${pioPinVal} pinDir[15]=${pioPinDir}` +
-              ` onPinChangeWithTime=${!!this.onPinChangeWithTime}`
+              `[RP2040 PIO diag] pioDiv=${pioDiv}` +
+              ` gpio15.funcSel=${funcSel} (7=PIO1)` +
+              ` pio1.stopped=${pio1Stopped} pinVal[15]=${pio1PinVal} pinDir[15]=${pio1PinDir}` +
+              ` pio1.clkDiv=${pio1ClkDiv}`
             );
           }
         }
