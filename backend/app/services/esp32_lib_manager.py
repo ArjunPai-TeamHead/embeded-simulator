@@ -343,6 +343,31 @@ class EspLibManager:
         if inst and inst.running and inst.process.returncode is None:
             self._write_cmd(inst, {'cmd': 'set_spi_response', 'response': response_byte & 0xFF})
 
+    # ── DHT22 sensor (backend-side protocol emulation) ─────────────────────
+
+    def dht22_attach(self, client_id: str, pin: int, temperature: float, humidity: float) -> None:
+        """Register a DHT22 sensor on a GPIO pin — the worker handles the protocol."""
+        with self._instances_lock:
+            inst = self._instances.get(client_id)
+        if inst and inst.running and inst.process.returncode is None:
+            self._write_cmd(inst, {'cmd': 'dht22_attach', 'pin': pin,
+                                   'temperature': temperature, 'humidity': humidity})
+
+    def dht22_update(self, client_id: str, pin: int, temperature: float, humidity: float) -> None:
+        """Update a DHT22 sensor's temperature and humidity values."""
+        with self._instances_lock:
+            inst = self._instances.get(client_id)
+        if inst and inst.running and inst.process.returncode is None:
+            self._write_cmd(inst, {'cmd': 'dht22_update', 'pin': pin,
+                                   'temperature': temperature, 'humidity': humidity})
+
+    def dht22_detach(self, client_id: str, pin: int) -> None:
+        """Remove a DHT22 sensor from a GPIO pin."""
+        with self._instances_lock:
+            inst = self._instances.get(client_id)
+        if inst and inst.running and inst.process.returncode is None:
+            self._write_cmd(inst, {'cmd': 'dht22_detach', 'pin': pin})
+
     # ── LEDC polling (no-op: worker polls automatically) ─────────────────────
 
     async def poll_ledc(self, client_id: str) -> None:

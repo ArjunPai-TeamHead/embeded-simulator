@@ -244,6 +244,21 @@ export class Esp32Bridge {
     this._send({ type: 'esp32_spi_response', data: { response } });
   }
 
+  /** Attach a DHT22 sensor to a GPIO pin — backend will handle the protocol */
+  dht22Attach(pin: number, temperature: number, humidity: number): void {
+    this._send({ type: 'esp32_dht22_attach', data: { pin, temperature, humidity } });
+  }
+
+  /** Update DHT22 sensor readings */
+  dht22Update(pin: number, temperature: number, humidity: number): void {
+    this._send({ type: 'esp32_dht22_update', data: { pin, temperature, humidity } });
+  }
+
+  /** Detach the DHT22 sensor from a GPIO pin */
+  dht22Detach(pin: number): void {
+    this._send({ type: 'esp32_dht22_detach', data: { pin } });
+  }
+
   private _send(payload: unknown): void {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(payload));

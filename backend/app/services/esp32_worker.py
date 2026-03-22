@@ -40,6 +40,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 # ─── stdout helpers ──────────────────────────────────────────────────────────
 
@@ -228,6 +229,62 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
     # ESP32 signal indices: 72-79 = LEDC HS ch 0-7, 80-87 = LEDC LS ch 0-7
     _ledc_gpio_map: dict[int, int] = {}
 
+    # DHT22 sensor state: gpio_pin → {temperature, humidity, saw_low, responding}
+    _dht22_sensors: dict[int, dict] = {}
+    _dht22_lock = threading.Lock()
+
+    def _busy_wait_us(us: int) -> None:
+        """Busy-wait for the given number of microseconds using perf_counter_ns."""
+        end = time.perf_counter_ns() + us * 1000
+        while time.perf_counter_ns() < end:
+            pass
+
+    def _dht22_build_payload(temperature: float, humidity: float) -> list[int]:
+        """Build 5-byte DHT22 data payload: [hum_H, hum_L, temp_H, temp_L, checksum]."""
+        hum = round(humidity * 10)
+        tmp = round(temperature * 10)
+        h_H = (hum >> 8) & 0xFF
+        h_L = hum & 0xFF
+        raw_t = ((-tmp) & 0x7FFF) | 0x8000 if tmp < 0 else tmp & 0x7FFF
+        t_H = (raw_t >> 8) & 0xFF
+        t_L = raw_t & 0xFF
+        chk = (h_H + h_L + t_H + t_L) & 0xFF
+        return [h_H, h_L, t_H, t_L, chk]
+
+    def _dht22_respond(gpio_pin: int, temperature: float, humidity: float) -> None:
+        """Thread function: inject the DHT22 protocol waveform via qemu_picsimlab_set_pin."""
+        slot = gpio_pin + 1  # identity pinmap: slot = gpio + 1
+        payload = _dht22_build_payload(temperature, humidity)
+
+        try:
+            # Preamble: 80 µs LOW → 80 µs HIGH (use 2x margins for QEMU speed variation)
+            lib.qemu_picsimlab_set_pin(slot, 0)
+            _busy_wait_us(160)
+            lib.qemu_picsimlab_set_pin(slot, 1)
+            _busy_wait_us(160)
+
+            # 40 data bits: 50 µs LOW + (26 µs HIGH = 0, 70 µs HIGH = 1)
+            # Use 2x margins: 100 µs LOW, 52 µs HIGH (0) / 140 µs HIGH (1)
+            for byte_val in payload:
+                for b in range(7, -1, -1):
+                    bit = (byte_val >> b) & 1
+                    lib.qemu_picsimlab_set_pin(slot, 0)
+                    _busy_wait_us(100)
+                    lib.qemu_picsimlab_set_pin(slot, 1)
+                    _busy_wait_us(140 if bit else 52)
+
+            # Final: release line HIGH
+            lib.qemu_picsimlab_set_pin(slot, 0)
+            _busy_wait_us(100)
+            lib.qemu_picsimlab_set_pin(slot, 1)
+        except Exception as exc:
+            _log(f'DHT22 respond error on GPIO {gpio_pin}: {exc}')
+        finally:
+            with _dht22_lock:
+                sensor = _dht22_sensors.get(gpio_pin)
+                if sensor:
+                    sensor['responding'] = False
+
     # ── 5. ctypes callbacks (called from QEMU thread) ─────────────────────────
 
     def _on_pin_change(slot: int, value: int) -> None:
@@ -235,6 +292,22 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
             return
         gpio = int(_PINMAP[slot]) if 1 <= slot <= _GPIO_COUNT else slot
         _emit({'type': 'gpio_change', 'pin': gpio, 'state': value})
+
+        # DHT22: detect start signal (firmware drives pin LOW then HIGH)
+        with _dht22_lock:
+            sensor = _dht22_sensors.get(gpio)
+        if sensor is not None:
+            if value == 0 and not sensor.get('responding', False):
+                sensor['saw_low'] = True
+            elif value == 1 and sensor.get('saw_low', False):
+                sensor['saw_low'] = False
+                sensor['responding'] = True
+                threading.Thread(
+                    target=_dht22_respond,
+                    args=(gpio, sensor['temperature'], sensor['humidity']),
+                    daemon=True,
+                    name=f'dht22-gpio{gpio}',
+                ).start()
 
     def _on_dir_change(slot: int, direction: int) -> None:
         if _stopped.is_set():
@@ -403,6 +476,33 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
 
         elif c == 'set_spi_response':
             _spi_response[0] = int(cmd['response']) & 0xFF
+
+        elif c == 'dht22_attach':
+            gpio = int(cmd['pin'])
+            with _dht22_lock:
+                _dht22_sensors[gpio] = {
+                    'temperature': float(cmd.get('temperature', 25.0)),
+                    'humidity': float(cmd.get('humidity', 50.0)),
+                    'saw_low': False,
+                    'responding': False,
+                }
+            _log(f'DHT22 attached on GPIO {gpio}')
+
+        elif c == 'dht22_update':
+            gpio = int(cmd['pin'])
+            with _dht22_lock:
+                sensor = _dht22_sensors.get(gpio)
+                if sensor:
+                    if 'temperature' in cmd:
+                        sensor['temperature'] = float(cmd['temperature'])
+                    if 'humidity' in cmd:
+                        sensor['humidity'] = float(cmd['humidity'])
+
+        elif c == 'dht22_detach':
+            gpio = int(cmd['pin'])
+            with _dht22_lock:
+                _dht22_sensors.pop(gpio, None)
+            _log(f'DHT22 detached from GPIO {gpio}')
 
         elif c == 'stop':
             _stopped.set()

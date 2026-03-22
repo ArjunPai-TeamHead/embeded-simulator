@@ -50,6 +50,8 @@ class Esp32BridgeShim {
   }
 
   setPinState(pin: number, state: boolean): void { this.bridge.sendPinEvent(pin, state); }
+  getBridge(): Esp32Bridge { return this.bridge; }
+  get isEsp32(): boolean { return true; }
   getCurrentCycles(): number { return -1; }
   getClockHz(): number { return 240_000_000; }
   isRunning(): boolean { return this.bridge.connected; }
@@ -737,26 +739,59 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
 
       getBoardSimulator(boardId)?.stop();
       simulatorMap.delete(boardId);
+      getEsp32Bridge(boardId)?.disconnect();
+      esp32BridgeMap.delete(boardId);
 
-      const sim = createSimulator(
-        boardType as BoardKind,
-        pm,
-        (ch) => set((s) => {
-          const boards = s.boards.map((b) =>
-            b.id === boardId ? { ...b, serialOutput: b.serialOutput + ch } : b
-          );
-          return { boards, serialOutput: s.serialOutput + ch };
-        }),
-        (baud) => set((s) => {
-          const boards = s.boards.map((b) =>
-            b.id === boardId ? { ...b, serialBaudRate: baud } : b
-          );
-          return { boards, serialBaudRate: baud };
-        }),
-        getOscilloscopeCallback(),
-      );
-      simulatorMap.set(boardId, sim);
-      set({ simulator: sim, serialOutput: '', serialBaudRate: 0 });
+      const serialCallback = (ch: string) => set((s) => {
+        const boards = s.boards.map((b) =>
+          b.id === boardId ? { ...b, serialOutput: b.serialOutput + ch } : b
+        );
+        return { boards, serialOutput: s.serialOutput + ch };
+      });
+
+      if (isEsp32Kind(boardType as BoardKind)) {
+        // ESP32: create bridge + shim (same as setBoardType)
+        const bridge = new Esp32Bridge(boardId, boardType as BoardKind);
+        bridge.onSerialData = serialCallback;
+        bridge.onPinChange = (gpioPin, state) => {
+          const boardPm = pinManagerMap.get(boardId);
+          if (boardPm) boardPm.triggerPinChange(gpioPin, state);
+        };
+        bridge.onCrash = () => { set({ esp32CrashBoardId: boardId }); };
+        bridge.onDisconnected = () => {
+          set((s) => {
+            const boards = s.boards.map((b) => b.id === boardId ? { ...b, running: false } : b);
+            const isActive = s.activeBoardId === boardId;
+            return { boards, ...(isActive ? { running: false } : {}) };
+          });
+        };
+        bridge.onLedcUpdate = (update) => {
+          const boardPm = pinManagerMap.get(boardId);
+          if (boardPm && typeof boardPm.updatePwm === 'function') {
+            boardPm.updatePwm(update.channel, update.duty_pct);
+          }
+        };
+        esp32BridgeMap.set(boardId, bridge);
+        const shim = new Esp32BridgeShim(bridge, pm);
+        shim.onSerialData = serialCallback;
+        simulatorMap.set(boardId, shim);
+        set({ simulator: shim as any, serialOutput: '', serialBaudRate: 0 });
+      } else {
+        const sim = createSimulator(
+          boardType as BoardKind,
+          pm,
+          serialCallback,
+          (baud) => set((s) => {
+            const boards = s.boards.map((b) =>
+              b.id === boardId ? { ...b, serialBaudRate: baud } : b
+            );
+            return { boards, serialBaudRate: baud };
+          }),
+          getOscilloscopeCallback(),
+        );
+        simulatorMap.set(boardId, sim);
+        set({ simulator: sim, serialOutput: '', serialBaudRate: 0 });
+      }
       console.log(`Simulator initialized: ${boardType}`);
     },
 

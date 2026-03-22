@@ -458,6 +458,28 @@ PartSimulationRegistry.register('dht22', {
     const pin = getPin('SDA') ?? getPin('DATA');
     if (pin === null) return () => {};
 
+    // ESP32: delegate DHT22 protocol to the backend QEMU worker.
+    // The frontend can't provide µs-level GPIO timing over WebSocket.
+    const sim = simulator as any;
+    if (sim.isEsp32) {
+      const bridge = sim.getBridge();
+      const el = element as any;
+      const temperature = el.temperature ?? 25.0;
+      const humidity = el.humidity ?? 50.0;
+      bridge.dht22Attach(pin, temperature, humidity);
+
+      registerSensorUpdate(componentId, (values) => {
+        if ('temperature' in values) el.temperature = values.temperature as number;
+        if ('humidity'    in values) el.humidity    = values.humidity    as number;
+        bridge.dht22Update(pin, el.temperature ?? 25.0, el.humidity ?? 50.0);
+      });
+
+      return () => {
+        bridge.dht22Detach(pin);
+        unregisterSensorUpdate(componentId);
+      };
+    }
+
     let wasLow = false;
     // Prevent DHT22's own scheduled pin changes from re-triggering the response.
     // After the MCU releases DATA HIGH and we begin responding, we ignore all
@@ -466,6 +488,7 @@ PartSimulationRegistry.register('dht22', {
     // 200 000 cycles (~12.5 ms) to give plenty of headroom.
     const RESPONSE_GATE_CYCLES = 200_000;
     let responseEndCycle = 0;
+    let responseEndTimeMs = 0; // time-based fallback for ESP32 (no cycle counter)
 
     const getCycles = (): number =>
       typeof (simulator as any).getCurrentCycles === 'function'
@@ -478,6 +501,8 @@ PartSimulationRegistry.register('dht22', {
         // While DHT22 is driving the line, ignore our own scheduled changes.
         const now = getCycles();
         if (now >= 0 && now < responseEndCycle) return;
+        // Time-based fallback for ESP32 (no cycle counter available)
+        if (now < 0 && Date.now() < responseEndTimeMs) return;
 
         if (!state) {
           // MCU drove DATA LOW — start signal detected
@@ -489,6 +514,7 @@ PartSimulationRegistry.register('dht22', {
           wasLow = false;
           const cur = getCycles();
           responseEndCycle = cur >= 0 ? cur + RESPONSE_GATE_CYCLES : 0;
+          responseEndTimeMs = Date.now() + 20; // 20ms gate for non-cycle simulators
           scheduleDHT22Response(simulator, pin, element);
         }
       },

@@ -173,6 +173,32 @@ async def simulation_websocket(websocket: WebSocket, client_id: str):
                         client_id, bytes(raw_bytes), uart_id=2
                     )
 
+            # ── ESP32 DHT22 sensor (backend-side protocol emulation) ─────
+            elif msg_type == 'esp32_dht22_attach':
+                pin = int(msg_data.get('pin', 0))
+                temperature = float(msg_data.get('temperature', 25.0))
+                humidity = float(msg_data.get('humidity', 50.0))
+                if _use_lib():
+                    esp_lib_manager.dht22_attach(client_id, pin, temperature, humidity)
+                else:
+                    esp_qemu_manager.dht22_attach(client_id, pin, temperature, humidity)
+
+            elif msg_type == 'esp32_dht22_update':
+                pin = int(msg_data.get('pin', 0))
+                temperature = float(msg_data.get('temperature', 25.0))
+                humidity = float(msg_data.get('humidity', 50.0))
+                if _use_lib():
+                    esp_lib_manager.dht22_update(client_id, pin, temperature, humidity)
+                else:
+                    esp_qemu_manager.dht22_update(client_id, pin, temperature, humidity)
+
+            elif msg_type == 'esp32_dht22_detach':
+                pin = int(msg_data.get('pin', 0))
+                if _use_lib():
+                    esp_lib_manager.dht22_detach(client_id, pin)
+                else:
+                    esp_qemu_manager.dht22_detach(client_id, pin)
+
             # ── ESP32 status query ────────────────────────────────────────
             elif msg_type == 'esp32_status':
                 if _use_lib():

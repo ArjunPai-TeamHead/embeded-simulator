@@ -3706,7 +3706,7 @@ void loop() {
     boardFilter: 'esp32',
     code: `// ESP32 — DHT22 Temperature & Humidity Sensor
 // Requires: Adafruit DHT sensor library
-// Wiring: DATA → D4  |  VCC → 3V3  |  GND → GND
+// Wiring: DATA → GPIO4  |  VCC → 3V3  |  GND → GND
 
 #include <DHT.h>
 
@@ -3717,17 +3717,22 @@ DHT dht(DHT_PIN, DHT_TYPE);
 
 void setup() {
   Serial.begin(115200);
+  // Disable watchdog — DHT pulseIn() can block in emulation
+  disableCore0WDT();
+  disableCore1WDT();
   dht.begin();
-  delay(1000);
+  delay(2000);
   Serial.println("ESP32 DHT22 ready!");
 }
 
 void loop() {
   delay(2000);
+
   float h = dht.readHumidity();
   float t = dht.readTemperature();
+
   if (isnan(h) || isnan(t)) {
-    Serial.println("DHT22 read error!");
+    Serial.println("DHT22: waiting for sensor...");
     return;
   }
   Serial.printf("Temp: %.1f C   Humidity: %.1f %%\\n", t, h);
@@ -3736,9 +3741,9 @@ void loop() {
       { type: 'wokwi-dht22', id: 'e32-dht1', x: 430, y: 150, properties: { temperature: '28', humidity: '65' } },
     ],
     wires: [
-      { id: 'e32d-vcc', start: { componentId: 'esp32', pinName: '3V3'  }, end: { componentId: 'e32-dht1', pinName: 'VCC' }, color: '#ff4444' },
-      { id: 'e32d-gnd', start: { componentId: 'esp32', pinName: 'GND.1'}, end: { componentId: 'e32-dht1', pinName: 'GND' }, color: '#000000' },
-      { id: 'e32d-sda', start: { componentId: 'esp32', pinName: 'D4'   }, end: { componentId: 'e32-dht1', pinName: 'SDA' }, color: '#22aaff' },
+      { id: 'e32d-vcc', start: { componentId: 'esp32', pinName: '3V3' }, end: { componentId: 'e32-dht1', pinName: 'VCC' }, color: '#ff4444' },
+      { id: 'e32d-gnd', start: { componentId: 'esp32', pinName: 'GND' }, end: { componentId: 'e32-dht1', pinName: 'GND' }, color: '#000000' },
+      { id: 'e32d-sda', start: { componentId: 'esp32', pinName: '4'   }, end: { componentId: 'e32-dht1', pinName: 'SDA' }, color: '#22aaff' },
     ],
   },
   {
@@ -3783,9 +3788,9 @@ void loop() {
     ],
     wires: [
       { id: 'e32s-vcc',  start: { componentId: 'esp32', pinName: '3V3'   }, end: { componentId: 'e32-sr1', pinName: 'VCC'  }, color: '#ff4444' },
-      { id: 'e32s-gnd',  start: { componentId: 'esp32', pinName: 'GND.1' }, end: { componentId: 'e32-sr1', pinName: 'GND'  }, color: '#000000' },
-      { id: 'e32s-trig', start: { componentId: 'esp32', pinName: 'D18'   }, end: { componentId: 'e32-sr1', pinName: 'TRIG' }, color: '#ff8800' },
-      { id: 'e32s-echo', start: { componentId: 'esp32', pinName: 'D19'   }, end: { componentId: 'e32-sr1', pinName: 'ECHO' }, color: '#22cc22' },
+      { id: 'e32s-gnd',  start: { componentId: 'esp32', pinName: 'GND'  }, end: { componentId: 'e32-sr1', pinName: 'GND'  }, color: '#000000' },
+      { id: 'e32s-trig', start: { componentId: 'esp32', pinName: '18'   }, end: { componentId: 'e32-sr1', pinName: 'TRIG' }, color: '#ff8800' },
+      { id: 'e32s-echo', start: { componentId: 'esp32', pinName: '19'   }, end: { componentId: 'e32-sr1', pinName: 'ECHO' }, color: '#22cc22' },
     ],
   },
   {
@@ -3835,9 +3840,9 @@ void loop() {
     ],
     wires: [
       { id: 'e32m-vcc', start: { componentId: 'esp32', pinName: '3V3'   }, end: { componentId: 'e32-mpu1', pinName: 'VCC' }, color: '#ff4444' },
-      { id: 'e32m-gnd', start: { componentId: 'esp32', pinName: 'GND.1' }, end: { componentId: 'e32-mpu1', pinName: 'GND' }, color: '#000000' },
-      { id: 'e32m-sda', start: { componentId: 'esp32', pinName: 'D21'   }, end: { componentId: 'e32-mpu1', pinName: 'SDA' }, color: '#22aaff' },
-      { id: 'e32m-scl', start: { componentId: 'esp32', pinName: 'D22'   }, end: { componentId: 'e32-mpu1', pinName: 'SCL' }, color: '#ff8800' },
+      { id: 'e32m-gnd', start: { componentId: 'esp32', pinName: 'GND' }, end: { componentId: 'e32-mpu1', pinName: 'GND' }, color: '#000000' },
+      { id: 'e32m-sda', start: { componentId: 'esp32', pinName: '21'  }, end: { componentId: 'e32-mpu1', pinName: 'SDA' }, color: '#22aaff' },
+      { id: 'e32m-scl', start: { componentId: 'esp32', pinName: '22'  }, end: { componentId: 'e32-mpu1', pinName: 'SCL' }, color: '#ff8800' },
     ],
   },
   {
@@ -3885,8 +3890,8 @@ void loop() {
     ],
     wires: [
       { id: 'e32p-vcc', start: { componentId: 'esp32', pinName: '3V3'   }, end: { componentId: 'e32-pir1', pinName: 'VCC' }, color: '#ff4444' },
-      { id: 'e32p-gnd', start: { componentId: 'esp32', pinName: 'GND.1' }, end: { componentId: 'e32-pir1', pinName: 'GND' }, color: '#000000' },
-      { id: 'e32p-out', start: { componentId: 'esp32', pinName: 'D5'    }, end: { componentId: 'e32-pir1', pinName: 'OUT' }, color: '#ffcc00' },
+      { id: 'e32p-gnd', start: { componentId: 'esp32', pinName: 'GND' }, end: { componentId: 'e32-pir1', pinName: 'GND' }, color: '#000000' },
+      { id: 'e32p-out', start: { componentId: 'esp32', pinName: '5'   }, end: { componentId: 'e32-pir1', pinName: 'OUT' }, color: '#ffcc00' },
     ],
   },
   {
@@ -3927,11 +3932,11 @@ void loop() {
     ],
     wires: [
       { id: 'e32sv-vcc',  start: { componentId: 'esp32',    pinName: '3V3'   }, end: { componentId: 'e32-sv1',  pinName: 'V+'  }, color: '#ff4444' },
-      { id: 'e32sv-gnd',  start: { componentId: 'esp32',    pinName: 'GND.1' }, end: { componentId: 'e32-sv1',  pinName: 'GND' }, color: '#000000' },
-      { id: 'e32sv-pwm',  start: { componentId: 'esp32',    pinName: 'D13'   }, end: { componentId: 'e32-sv1',  pinName: 'PWM' }, color: '#ff8800' },
-      { id: 'e32pt-vcc',  start: { componentId: 'esp32',    pinName: '3V3'   }, end: { componentId: 'e32-pot1', pinName: 'VCC' }, color: '#ff4444' },
-      { id: 'e32pt-gnd',  start: { componentId: 'esp32',    pinName: 'GND.1' }, end: { componentId: 'e32-pot1', pinName: 'GND' }, color: '#000000' },
-      { id: 'e32pt-sig',  start: { componentId: 'esp32',    pinName: 'D34'   }, end: { componentId: 'e32-pot1', pinName: 'SIG' }, color: '#aa44ff' },
+      { id: 'e32sv-gnd',  start: { componentId: 'esp32',    pinName: 'GND'  }, end: { componentId: 'e32-sv1',  pinName: 'GND' }, color: '#000000' },
+      { id: 'e32sv-pwm',  start: { componentId: 'esp32',    pinName: '13'   }, end: { componentId: 'e32-sv1',  pinName: 'PWM' }, color: '#ff8800' },
+      { id: 'e32pt-vcc',  start: { componentId: 'esp32',    pinName: '3V3'  }, end: { componentId: 'e32-pot1', pinName: 'VCC' }, color: '#ff4444' },
+      { id: 'e32pt-gnd',  start: { componentId: 'esp32',    pinName: 'GND2' }, end: { componentId: 'e32-pot1', pinName: 'GND' }, color: '#000000' },
+      { id: 'e32pt-sig',  start: { componentId: 'esp32',    pinName: '34'   }, end: { componentId: 'e32-pot1', pinName: 'SIG' }, color: '#aa44ff' },
     ],
   },
   {
@@ -3973,10 +3978,10 @@ void loop() {
     ],
     wires: [
       { id: 'e32j-vcc',  start: { componentId: 'esp32', pinName: '3V3'   }, end: { componentId: 'e32-joy1', pinName: 'VCC'  }, color: '#ff4444' },
-      { id: 'e32j-gnd',  start: { componentId: 'esp32', pinName: 'GND.1' }, end: { componentId: 'e32-joy1', pinName: 'GND'  }, color: '#000000' },
-      { id: 'e32j-vert', start: { componentId: 'esp32', pinName: 'D34'   }, end: { componentId: 'e32-joy1', pinName: 'VERT' }, color: '#22aaff' },
-      { id: 'e32j-horz', start: { componentId: 'esp32', pinName: 'D35'   }, end: { componentId: 'e32-joy1', pinName: 'HORZ' }, color: '#22cc44' },
-      { id: 'e32j-sel',  start: { componentId: 'esp32', pinName: 'D15'   }, end: { componentId: 'e32-joy1', pinName: 'SEL'  }, color: '#aa44ff' },
+      { id: 'e32j-gnd',  start: { componentId: 'esp32', pinName: 'GND' }, end: { componentId: 'e32-joy1', pinName: 'GND'  }, color: '#000000' },
+      { id: 'e32j-vert', start: { componentId: 'esp32', pinName: '34'  }, end: { componentId: 'e32-joy1', pinName: 'VERT' }, color: '#22aaff' },
+      { id: 'e32j-horz', start: { componentId: 'esp32', pinName: '35'  }, end: { componentId: 'e32-joy1', pinName: 'HORZ' }, color: '#22cc44' },
+      { id: 'e32j-sel',  start: { componentId: 'esp32', pinName: '15'  }, end: { componentId: 'e32-joy1', pinName: 'SEL'  }, color: '#aa44ff' },
     ],
   },
 
@@ -4002,17 +4007,21 @@ DHT dht(DHT_PIN, DHT_TYPE);
 
 void setup() {
   Serial.begin(115200);
+  // Disable watchdog — DHT pulseIn() can block in emulation
+  disableCore0WDT();
   dht.begin();
-  delay(1000);
+  delay(2000);
   Serial.println("ESP32-C3 DHT22 ready!");
 }
 
 void loop() {
   delay(2000);
+
   float h = dht.readHumidity();
   float t = dht.readTemperature();
+
   if (isnan(h) || isnan(t)) {
-    Serial.println("DHT22 read error!");
+    Serial.println("DHT22: waiting for sensor...");
     return;
   }
   Serial.printf("Temp: %.1f C   Humidity: %.1f %%\\n", t, h);
