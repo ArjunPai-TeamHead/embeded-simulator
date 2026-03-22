@@ -259,6 +259,12 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         payload = _dht22_build_payload(temperature, humidity)
 
         try:
+            # Wait for the firmware's start signal (LOW pulse) to end.
+            # Adafruit DHT library holds LOW for ~1-20 ms then switches to INPUT.
+            # QEMU doesn't fire a pin-change callback when the pin goes to INPUT
+            # (high-Z / pull-up), so we trigger on the LOW event and wait here.
+            time.sleep(0.025)  # 25 ms — covers max LOW pulse + margin
+
             # Preamble: 80 µs LOW → 80 µs HIGH (use 2x margins for QEMU speed variation)
             lib.qemu_picsimlab_set_pin(slot, 0)
             _busy_wait_us(160)
@@ -327,10 +333,12 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         stype = sensor.get('type', '')
 
         if stype == 'dht22':
+            # QEMU only fires pin-change for OUTPUT drives; switching to INPUT
+            # (pull-up HIGH) does NOT generate a value=1 callback.  So we
+            # trigger the response on the LOW event directly.  The response
+            # thread sleeps ~25 ms to let the firmware's start pulse finish
+            # before driving the preamble + data waveform.
             if value == 0 and not sensor.get('responding', False):
-                sensor['saw_low'] = True
-            elif value == 1 and sensor.get('saw_low', False):
-                sensor['saw_low'] = False
                 sensor['responding'] = True
                 threading.Thread(
                     target=_dht22_respond,
