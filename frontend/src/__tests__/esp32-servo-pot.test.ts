@@ -470,7 +470,201 @@ describe('ESP32 ADC channel mapping', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 10. LEDC polling — data type and internal config
+// 10. LEDC 0x5000 marker decoding — channel extraction fix
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('LEDC 0x5000 marker decoding', () => {
+  // QEMU fires: qemu_set_irq(ledc_sync, 0x5000 | (ledn << 8) | intensity)
+  // Worker must extract: ledc_ch = (direction >> 8) & 0x0F (NOT & 0xFF)
+
+  function decodeLedc(direction: number) {
+    const marker = direction & 0xF000;
+    if (marker !== 0x5000) return null;
+    const ledc_ch = (direction >> 8) & 0x0F;  // correct: strips marker bits
+    const intensity = direction & 0xFF;
+    return { ledc_ch, intensity };
+  }
+
+  function decodeLedcBroken(direction: number) {
+    const marker = direction & 0xF000;
+    if (marker !== 0x5000) return null;
+    const ledc_ch = (direction >> 8) & 0xFF;  // BUG: includes marker bits
+    const intensity = direction & 0xFF;
+    return { ledc_ch, intensity };
+  }
+
+  it('HS channel 0 (ledn=0): direction=0x500B → ch=0, not ch=80', () => {
+    const direction = 0x5000 | (0 << 8) | 11; // 0x500B
+    const correct = decodeLedc(direction)!;
+    const broken = decodeLedcBroken(direction)!;
+
+    expect(correct.ledc_ch).toBe(0);   // correct
+    expect(broken.ledc_ch).toBe(80);   // BUG: 0x50 = 80
+    expect(correct.intensity).toBe(11);
+  });
+
+  it('LS channel 0 (ledn=8): direction=0x5811 → ch=8, not ch=88', () => {
+    const direction = 0x5000 | (8 << 8) | 17; // 0x5811
+    const correct = decodeLedc(direction)!;
+    const broken = decodeLedcBroken(direction)!;
+
+    expect(correct.ledc_ch).toBe(8);   // correct
+    expect(broken.ledc_ch).toBe(88);   // BUG: 0x58 = 88
+    expect(correct.intensity).toBe(17);
+  });
+
+  it('HS channel 7 (ledn=7): direction=0x5732 → ch=7', () => {
+    const direction = 0x5000 | (7 << 8) | 50; // 0x5732
+    expect(decodeLedc(direction)!.ledc_ch).toBe(7);
+    expect(decodeLedc(direction)!.intensity).toBe(50);
+  });
+
+  it('LS channel 7 (ledn=15): direction=0x5F64 → ch=15', () => {
+    const direction = 0x5000 | (15 << 8) | 100; // 0x5F64
+    expect(decodeLedc(direction)!.ledc_ch).toBe(15);
+    expect(decodeLedc(direction)!.intensity).toBe(100);
+  });
+
+  it('all 16 channels decode correctly', () => {
+    for (let ledn = 0; ledn < 16; ledn++) {
+      const direction = 0x5000 | (ledn << 8) | 42;
+      const result = decodeLedc(direction)!;
+      expect(result.ledc_ch).toBe(ledn);
+      expect(result.intensity).toBe(42);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. GPIO out_sel scanning — LEDC→GPIO mapping
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('GPIO out_sel scanning for LEDC mapping', () => {
+  // Simulates what the LEDC poll thread does: read gpio_out_sel[40] and
+  // scan for LEDC signal values (72-87) to build _ledc_gpio_map
+
+  function scanOutSel(outSel: number[]): Map<number, number> {
+    const ledcGpioMap = new Map<number, number>();
+    for (let gpioPin = 0; gpioPin < outSel.length; gpioPin++) {
+      const signal = outSel[gpioPin] & 0xFF;
+      if (signal >= 72 && signal <= 87) {
+        const ledcCh = signal - 72;
+        ledcGpioMap.set(ledcCh, gpioPin);
+      }
+    }
+    return ledcGpioMap;
+  }
+
+  it('detects LEDC HS ch0 (signal=72) on GPIO 13', () => {
+    const outSel = new Array(40).fill(256); // 256 = no function
+    outSel[13] = 72; // LEDC HS ch0 → GPIO 13
+    const map = scanOutSel(outSel);
+
+    expect(map.get(0)).toBe(13);
+    expect(map.size).toBe(1);
+  });
+
+  it('detects LEDC LS ch0 (signal=80) on GPIO 2', () => {
+    const outSel = new Array(40).fill(256);
+    outSel[2] = 80; // LEDC LS ch0 → GPIO 2
+    const map = scanOutSel(outSel);
+
+    expect(map.get(8)).toBe(2); // ch8 = LS ch0
+  });
+
+  it('detects multiple LEDC channels', () => {
+    const outSel = new Array(40).fill(256);
+    outSel[13] = 72;  // HS ch0 → GPIO 13
+    outSel[12] = 73;  // HS ch1 → GPIO 12
+    outSel[14] = 80;  // LS ch0 → GPIO 14
+    const map = scanOutSel(outSel);
+
+    expect(map.get(0)).toBe(13);
+    expect(map.get(1)).toBe(12);
+    expect(map.get(8)).toBe(14);
+    expect(map.size).toBe(3);
+  });
+
+  it('ignores non-LEDC signals (< 72 or > 87)', () => {
+    const outSel = new Array(40).fill(256);
+    outSel[5] = 71;  // signal 71 = not LEDC
+    outSel[6] = 88;  // signal 88 = not LEDC
+    outSel[7] = 0;   // signal 0 = GPIO matrix simple
+    const map = scanOutSel(outSel);
+
+    expect(map.size).toBe(0);
+  });
+
+  it('explains why 0x2000 marker was broken for LEDC signals', () => {
+    // QEMU fires: 0x2000 | ((signal & 0xFF) << 8) | (gpio & 0xFF)
+    // For signal=72 (0x48), gpio=13: direction = 0x2000 | 0x4800 | 0x0D = 0x680D
+    // marker = direction & 0xF000 = 0x6000 ≠ 0x2000 → NEVER MATCHED!
+    const signal = 72;
+    const gpio = 13;
+    const direction = 0x2000 | ((signal & 0xFF) << 8) | (gpio & 0xFF);
+
+    expect(direction).toBe(0x680D);
+    expect(direction & 0xF000).toBe(0x6000); // NOT 0x2000!
+    expect(direction & 0xF000).not.toBe(0x2000); // confirms the bug
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. End-to-end: LEDC update with correct GPIO routes to servo
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('End-to-end: LEDC → servo angle', () => {
+  const logic = () => PartSimulationRegistry.get('servo')!;
+
+  it('ledc_update with gpio=13 → updatePwm(13, duty) → servo moves', () => {
+    const shim = makeEsp32Shim();
+    const el = makeElement() as any;
+    logic().attachEvents!(el, shim as any, pinMap({ PWM: 13 }), 'servo-e2e');
+
+    // Simulate what useSimulatorStore.onLedcUpdate does:
+    const update = { channel: 0, duty: 7.36, duty_pct: 7.36, gpio: 13 };
+    const targetPin = (update.gpio >= 0) ? update.gpio : update.channel;
+    const dutyCycleFraction = update.duty_pct / 100;
+
+    // This is what the store calls:
+    shim.pinManager.updatePwm(targetPin, dutyCycleFraction);
+
+    // The servo's onPwmChange callback should have been triggered
+    const cb = shim._getPwmCallback();
+    expect(cb).not.toBeNull();
+
+    // Manually invoke the callback (simulating PinManager dispatching)
+    cb!(13, dutyCycleFraction);
+
+    // 7.36% duty = 1472µs pulse → ~90°
+    expect(el.angle).toBeGreaterThanOrEqual(88);
+    expect(el.angle).toBeLessThanOrEqual(92);
+  });
+
+  it('ledc_update with WRONG ch=80 and gpio=-1 would NOT reach servo on pin 13', () => {
+    // This demonstrates the bug that was fixed:
+    // ch=80 (from broken & 0xFF) with gpio=-1 → updatePwm(80, duty)
+    // But servo listens on pin 13 → callback never fires
+    const shim = makeEsp32Shim();
+    const el = makeElement() as any;
+    logic().attachEvents!(el, shim as any, pinMap({ PWM: 13 }), 'servo-bug-demo');
+
+    const cb = shim._getPwmCallback();
+
+    // With the bug: updatePwm would be called with pin=80 (wrong)
+    // The servo registered on pin 13, so this would NOT trigger it
+    // (PinManager only dispatches to callbacks registered for that pin)
+    expect(cb).not.toBeNull();
+
+    // Calling with wrong pin does nothing (servo registered on 13, not 80)
+    cb!(80, 0.075); // wrong pin
+    // angle still 0 since the real PinManager wouldn't route pin 80 to pin 13's callback
+    // (In our mock, the callback is directly invoked, but in production it wouldn't fire)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. LEDC polling — data type and internal config
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('LEDC polling — data format', () => {

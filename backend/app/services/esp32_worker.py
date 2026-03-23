@@ -421,14 +421,14 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                     _dht22_sync_step()
                 return  # always return for GPIO_IN syncs (fast path)
             marker = direction & 0xF000
-            if marker == 0x2000:  # GPIO_FUNCX_OUT_SEL_CFG change
-                gpio_pin = direction & 0xFF
-                signal   = (direction >> 8) & 0xFF
-                # Signal 72-79 = LEDC HS ch 0-7; 80-87 = LEDC LS ch 0-7
-                if 72 <= signal <= 87:
-                    ledc_ch = signal - 72  # ch 0-15
-                    _ledc_gpio_map[ledc_ch] = gpio_pin
-                    _log(f'LEDC map: ch{ledc_ch} → GPIO{gpio_pin} (signal={signal})')
+            if marker == 0x5000:  # LEDC duty change (from esp32_ledc.c)
+                ledc_ch = (direction >> 8) & 0x0F
+                intensity = direction & 0xFF  # 0-100 percentage
+                gpio = _ledc_gpio_map.get(ledc_ch, -1)
+                _emit({'type': 'ledc_update', 'channel': ledc_ch,
+                       'duty': intensity,
+                       'duty_pct': intensity,
+                       'gpio': gpio})
             return
 
         # ── DHT22: track direction changes + trigger sync response ───────
@@ -588,25 +588,36 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         # Track last-emitted duty to avoid flooding identical updates
         _last_duty = [0.0] * 16
         _diag_count = [0]
+        _first_nonzero_logged = [False]
         _log('LEDC poll thread started')
         while not _stopped.wait(0.1):
             try:
                 ptr = lib.qemu_picsimlab_get_internals(6)  # LEDC_CHANNEL_DUTY
                 _diag_count[0] += 1
-                # Log first 5 polls for diagnostics
-                if _diag_count[0] <= 5:
-                    _log(f'LEDC poll #{_diag_count[0]}: ptr={ptr} '
-                         f'(type={type(ptr).__name__}) gpio_map={dict(_ledc_gpio_map)}')
                 if ptr is None or ptr == 0:
-                    if _diag_count[0] <= 5:
-                        _log(f'LEDC poll: ptr is NULL/0, skipping')
                     continue
                 # duty[] is float[16] in QEMU (percentage 0-100)
                 arr = (ctypes.c_float * 16).from_address(ptr)
-                if _diag_count[0] <= 5:
+                # Refresh LEDC→GPIO mapping from gpio_out_sel[40] registers
+                out_sel_ptr = lib.qemu_picsimlab_get_internals(2)
+                if out_sel_ptr:
+                    out_sel = (ctypes.c_uint32 * 40).from_address(out_sel_ptr)
+                    for gpio_pin in range(40):
+                        signal = int(out_sel[gpio_pin]) & 0xFF
+                        # Signal 72-79 = LEDC HS ch 0-7; 80-87 = LEDC LS ch 0-7
+                        if 72 <= signal <= 87:
+                            ledc_ch = signal - 72
+                            if _ledc_gpio_map.get(ledc_ch) != gpio_pin:
+                                _ledc_gpio_map[ledc_ch] = gpio_pin
+                                _log(f'LEDC map: ch{ledc_ch} → GPIO{gpio_pin} (signal={signal})')
+                # Log once when nonzero duties first appear
+                if not _first_nonzero_logged[0]:
                     nonzero = {ch: round(float(arr[ch]), 2) for ch in range(16)
                                if float(arr[ch]) != 0.0}
-                    _log(f'LEDC poll: nonzero duties={nonzero}')
+                    if nonzero:
+                        _log(f'LEDC first nonzero at poll #{_diag_count[0]}: '
+                             f'duties={nonzero} gpio_map={dict(_ledc_gpio_map)}')
+                        _first_nonzero_logged[0] = True
                 for ch in range(16):
                     duty_pct = float(arr[ch])
                     if abs(duty_pct - _last_duty[ch]) < 0.01:
