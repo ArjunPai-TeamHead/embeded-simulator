@@ -118,7 +118,7 @@ const JSON_LD: object[] = [
     operatingSystem: 'Any (browser-based)',
     softwareVersion: '2.0.0',
     description:
-      'Velxio 2.0 — a free, open-source multi-board embedded systems simulator. 19 boards, 5 CPU architectures, QEMU-based ESP32 emulation, sensor simulation, 68+ examples. Runs in your browser.',
+      'Velxio 2.0 — simulate Arduino, ESP32, Raspberry Pi Pico, and Raspberry Pi 3 in your browser. 19 boards, 68+ examples, realistic sensor simulation. Free and open-source.',
     url: 'https://velxio.dev/v2',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     author: { '@type': 'Person', name: 'David Montero Crespo' },
@@ -236,7 +236,7 @@ export const Velxio2Page: React.FC = () => {
   useSEO({
     title: 'Velxio 2.0 — Multi-Board Embedded Simulator | ESP32, Raspberry Pi, Arduino, RISC-V',
     description:
-      'Velxio 2.0 is here. 19 boards, 5 CPU architectures, QEMU-based ESP32 emulation, realistic sensor simulation, 68+ examples. A free, open-source multi-platform embedded systems simulator.',
+      'Velxio 2.0 is here. Simulate Arduino, ESP32, Raspberry Pi Pico, and Raspberry Pi 3 in your browser. 19 boards, 68+ examples, realistic sensor simulation. Free and open-source.',
     url: 'https://velxio.dev/v2',
     jsonLd: JSON_LD,
   });
@@ -255,9 +255,9 @@ export const Velxio2Page: React.FC = () => {
             <span className="accent">Multi-Platform Embedded Simulator</span>
           </h1>
           <p className="subtitle">
-            19 boards across 5 CPU architectures — AVR8, RP2040, RISC-V, Xtensa, and ARM Linux.
-            QEMU-based ESP32 emulation, realistic sensor simulation, 68+ ready-to-run examples.
-            Free, open-source, runs in your browser.
+            Simulate Arduino, ESP32, Raspberry Pi Pico, and Raspberry Pi 3 in your browser.
+            19 boards, 68+ ready-to-run examples, realistic sensor simulation.
+            Free, open-source, no install needed.
           </p>
           <div className="seo-cta-group">
             <Link to="/editor" className="seo-btn-primary">
