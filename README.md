@@ -4,6 +4,8 @@
 
 A fully local, open-source multi-board emulator. Write Arduino C++ or Python, compile it, and simulate it with real CPU emulation and 48+ interactive electronic components — all running in your browser.
 
+**19 boards &middot; 5 CPU architectures**: AVR8 (ATmega / ATtiny), ARM Cortex-M0+ (RP2040), RISC-V RV32IMC/EC (ESP32-C3 / CH32V003), Xtensa LX6/LX7 (ESP32 / ESP32-S3 via QEMU), and ARM Cortex-A53 (Raspberry Pi 3 Linux via QEMU).
+
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-velxio.dev-007acc?style=for-the-badge)](https://velxio.dev)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fdavidmonterocrespo24%2Fvelxio-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/davidmonterocrespo24/velxio/pkgs/container/velxio)
 [![GitHub stars](https://img.shields.io/github/stars/davidmonterocrespo24/velxio?style=for-the-badge)](https://github.com/davidmonterocrespo24/velxio/stargazers)
@@ -83,26 +85,31 @@ Component Picker showing 48 available components with visual previews, search, a
   <td align="center"><img src="docs/img/boards/xiao-esp32-s3.png" width="140" alt="Seeed XIAO ESP32-S3"/><br/><b>Seeed XIAO ESP32-S3</b></td>
   <td align="center"><img src="docs/img/boards/arduino-nano-esp32.png" width="140" alt="Arduino Nano ESP32"/><br/><b>Arduino Nano ESP32</b></td>
   <td align="center"><img src="docs/img/boards/Raspberry_Pi_3.png" width="140" alt="Raspberry Pi 3B"/><br/><b>Raspberry Pi 3B</b></td>
-  <td align="center">Arduino Uno / Nano / Mega<br/>(ATmega328p / 2560)</td>
+  <td align="center">Arduino Uno &middot; Nano &middot; Mega 2560<br/>ATtiny85 &middot; Leonardo &middot; Pro Mini<br/>(AVR8 / ATmega)</td>
 </tr>
 </table>
 
 | Board | CPU | Engine | Language |
 | ----- | --- | ------ | -------- |
-| Arduino Uno | ATmega328p @ 16 MHz | avr8js (browser) | C++ (Arduino) |
-| Arduino Nano | ATmega328p @ 16 MHz | avr8js (browser) | C++ (Arduino) |
-| Arduino Mega | ATmega2560 @ 16 MHz | avr8js (browser) | C++ (Arduino) |
-| Raspberry Pi Pico | RP2040 @ 125 MHz | rp2040js (browser) | C++ (Arduino) |
-| Raspberry Pi Pico W | RP2040 @ 125 MHz | rp2040js (browser) | C++ (Arduino) |
-| ESP32 DevKit C | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
-| ESP32-S3 | Xtensa LX7 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
-| ESP32-CAM | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
-| ESP32-C3 | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
-| Seeed XIAO ESP32-C3 | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
-| ESP32-C3 SuperMini | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
-| Seeed XIAO ESP32-S3 | Xtensa LX7 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
-| Arduino Nano ESP32 | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
-| Raspberry Pi 3B | ARM Cortex-A53 @ 1.2 GHz | QEMU raspi3b (backend) | Python |
+| **Arduino Uno** | ATmega328p @ 16 MHz | avr8js (browser) | C++ (Arduino) |
+| **Arduino Nano** | ATmega328p @ 16 MHz | avr8js (browser) | C++ (Arduino) |
+| **Arduino Mega 2560** | ATmega2560 @ 16 MHz | avr8js (browser) | C++ (Arduino) |
+| **ATtiny85** | ATtiny85 @ 8 MHz (int) / 16 MHz (ext) | avr8js (browser) | C++ (Arduino) |
+| **Arduino Leonardo** | ATmega32u4 @ 16 MHz | avr8js (browser) | C++ (Arduino) |
+| **Arduino Pro Mini** | ATmega328p @ 8/16 MHz | avr8js (browser) | C++ (Arduino) |
+| **Raspberry Pi Pico** | RP2040 @ 133 MHz | rp2040js (browser) | C++ (Arduino) |
+| **Raspberry Pi Pico W** | RP2040 @ 133 MHz | rp2040js (browser) | C++ (Arduino) |
+| **ESP32 DevKit V1** | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **ESP32 DevKit C V4** | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **ESP32-S3** | Xtensa LX7 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **ESP32-CAM** | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **Seeed XIAO ESP32-S3** | Xtensa LX7 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **Arduino Nano ESP32** | Xtensa LX6 @ 240 MHz | QEMU lcgamboa (backend) | C++ (Arduino) |
+| **ESP32-C3 DevKit** | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
+| **Seeed XIAO ESP32-C3** | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
+| **ESP32-C3 SuperMini** | RISC-V RV32IMC @ 160 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
+| **CH32V003** | RISC-V RV32EC @ 48 MHz | RiscVCore.ts (browser) | C++ (Arduino) |
+| **Raspberry Pi 3B** | ARM Cortex-A53 @ 1.2 GHz | QEMU raspi3b (backend) | Python |
 
 ---
 
@@ -118,20 +125,21 @@ Component Picker showing 48 available components with visual previews, search, a
 
 ### Multi-Board Simulation
 
-#### AVR8 (Arduino Uno / Nano / Mega)
+#### AVR8 (Arduino Uno / Nano / Mega / ATtiny85 / Leonardo / Pro Mini)
 
-- **Real ATmega328p / ATmega2560 emulation** at 16 MHz via avr8js
-- **Full GPIO** — PORTB (pins 8–13), PORTC (A0–A5), PORTD (pins 0–7)
+- **Real ATmega328p / ATmega2560 / ATmega32u4 / ATtiny85 emulation** at native clock speed via avr8js
+- **Full GPIO** — PORTB, PORTC, PORTD (Uno/Nano/Mega); all ATtiny85 ports (PB0–PB5)
 - **Timer0/Timer1/Timer2** — `millis()`, `delay()`, PWM via `analogWrite()`
 - **USART** — full transmit and receive, auto baud-rate detection
-- **ADC** — `analogRead()` on A0–A5, voltage injection from potentiometers on canvas
+- **ADC** — `analogRead()`, voltage injection from potentiometers on canvas
 - **SPI** — hardware SPI peripheral (ILI9341, SD card, etc.)
 - **I2C (TWI)** — hardware I2C with virtual device bus
+- **ATtiny85** — all 6 I/O pins, USI (Wire), Timer0/Timer1, 10-bit ADC; uses `AttinyCore`
 - ~60 FPS simulation loop via `requestAnimationFrame`
 
 #### RP2040 (Raspberry Pi Pico / Pico W)
 
-- **Real RP2040 emulation** at 125 MHz via rp2040js — ARM Cortex-M0+
+- **Real RP2040 emulation** at 133 MHz via rp2040js — ARM Cortex-M0+
 - **All 30 GPIO pins** — input/output, event listeners, pin state injection
 - **UART0 + UART1** — serial output in Serial Monitor; Serial input from UI
 - **ADC** — 12-bit on GPIO 26–29 (A0–A3) + internal temperature sensor (ch4)
@@ -159,11 +167,12 @@ See [docs/RP2040_EMULATION.md](docs/RP2040_EMULATION.md) for full technical deta
 
 See [docs/ESP32_EMULATION.md](docs/ESP32_EMULATION.md) for setup and full technical details.
 
-#### ESP32-C3 / XIAO-C3 (RISC-V, in-browser)
+#### ESP32-C3 / XIAO-C3 / SuperMini / CH32V003 (RISC-V, in-browser)
 
 - **RV32IMC emulation** in TypeScript — no backend, no QEMU, no WebSocket
-- **GPIO 0–21** via W1TS/W1TC MMIO registers
+- **GPIO 0–21** via W1TS/W1TC MMIO registers (ESP32-C3); PB0–PB5 (CH32V003)
 - **UART0** serial output in Serial Monitor
+- **CH32V003** — RV32EC core at 48 MHz, 16 KB flash, DIP-8 / SOP package — ultra-compact
 - **Instant startup** — zero latency, works offline
 - **CI-testable** — same TypeScript runs in Vitest
 
