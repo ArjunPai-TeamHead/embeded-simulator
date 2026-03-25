@@ -37,10 +37,18 @@ export const PinOverlay: React.FC<PinOverlayProps> = ({
   const [pins, setPins] = useState<PinInfo[]>([]);
 
   useEffect(() => {
-    // Get pin info from wokwi-element
-    const element = document.getElementById(componentId);
-    if (element && (element as any).pinInfo) {
-      setPins((element as any).pinInfo);
+    const tryRead = () => {
+      const element = document.getElementById(componentId);
+      if (element && (element as any).pinInfo) {
+        setPins((element as any).pinInfo);
+        return true;
+      }
+      return false;
+    };
+    if (!tryRead()) {
+      // Retry once after a tick in case the element sets pinInfo asynchronously (e.g. via useEffect)
+      const t = setTimeout(tryRead, 50);
+      return () => clearTimeout(t);
     }
   }, [componentId]);
 
@@ -55,28 +63,33 @@ export const PinOverlay: React.FC<PinOverlayProps> = ({
         left: `${componentX + wrapperOffsetX}px`,
         top: `${componentY + wrapperOffsetY}px`,
         pointerEvents: 'none',
-        zIndex: 10, // Above wires (1) and components, below modals/dialogs (1000+)
+        zIndex: 30, // Above wires (20) and components, below modals/dialogs (1000+)
       }}
     >
-      {pins.map((pin) => {
+      {pins.map((pin, index) => {
         // Pin coordinates are already in CSS pixels
         const pinX = pin.x;
         const pinY = pin.y;
 
         return (
           <div
-            key={pin.name}
+            key={`${pin.name}-${index}`}
+            data-pin-overlay="true"
             onClick={(e) => {
+              e.stopPropagation();
+              onPinClick(componentId, pin.name, componentX + wrapperOffsetX + pinX, componentY + wrapperOffsetY + pinY);
+            }}
+            onTouchEnd={(e) => {
               e.stopPropagation();
               onPinClick(componentId, pin.name, componentX + wrapperOffsetX + pinX, componentY + wrapperOffsetY + pinY);
             }}
             style={{
               position: 'absolute',
-              left: `${pinX - 4}px`,
-              top: `${pinY - 4}px`,
-              width: '8px',
-              height: '8px',
-              borderRadius: '2px',
+              left: `${pinX - 6}px`,
+              top: `${pinY - 6}px`,
+              width: '12px',
+              height: '12px',
+              borderRadius: '3px',
               backgroundColor: 'rgba(0, 200, 255, 0.8)',
               border: '1.5px solid white',
               cursor: 'crosshair',

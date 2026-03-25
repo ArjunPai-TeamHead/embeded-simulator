@@ -73,14 +73,20 @@ export class PinManager {
         if (callbacks) {
           callbacks.forEach(cb => cb(arduinoPin, newState));
         }
-
-        console.log(`Pin ${arduinoPin} (${portName}${bit}): ${oldState ? 'HIGH' : 'LOW'} → ${newState ? 'HIGH' : 'LOW'}`);
       }
     }
   }
 
   getPinState(arduinoPin: number): boolean {
     return this.pinStates.get(arduinoPin) || false;
+  }
+
+  /**
+   * Set a single pin state and notify listeners.
+   * Alias for triggerPinChange — used by ESP32-C3, RISC-V, and RP2040 simulators.
+   */
+  setPinState(pin: number, state: boolean): void {
+    this.triggerPinChange(pin, state);
   }
 
   /**
@@ -122,6 +128,18 @@ export class PinManager {
     if (callbacks) {
       callbacks.forEach(cb => cb(pin, dutyCycle));
     }
+  }
+
+  /**
+   * Broadcast PWM duty to ALL registered PWM listeners.
+   * Used when the LEDC channel→GPIO mapping is unknown (gpio=-1).
+   * Components filter by duty range (e.g., servo accepts 0.01-0.20).
+   */
+  broadcastPwm(dutyCycle: number): void {
+    this.pwmListeners.forEach((callbacks, pin) => {
+      this.pwmValues.set(pin, dutyCycle);
+      callbacks.forEach(cb => cb(pin, dutyCycle));
+    });
   }
 
   getPwmValue(pin: number): number {

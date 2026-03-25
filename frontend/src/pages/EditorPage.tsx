@@ -2,11 +2,17 @@
  * Editor Page — main editor + simulator with resizable panels
  */
 
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useSEO } from '../utils/useSEO';
 import { CodeEditor } from '../components/editor/CodeEditor';
 import { EditorToolbar } from '../components/editor/EditorToolbar';
 import { FileTabs } from '../components/editor/FileTabs';
 import { FileExplorer } from '../components/editor/FileExplorer';
+
+// Lazy-load Pi workspace so xterm.js isn't in the main bundle
+const RaspberryPiWorkspace = lazy(() =>
+  import('../components/raspberry-pi/RaspberryPiWorkspace').then((m) => ({ default: m.RaspberryPiWorkspace }))
+);
 import { CompilationConsole } from '../components/editor/CompilationConsole';
 import { SimulatorCanvas } from '../components/simulator/SimulatorCanvas';
 import { SerialMonitor } from '../components/simulator/SerialMonitor';
@@ -14,6 +20,7 @@ import { Oscilloscope } from '../components/simulator/Oscilloscope';
 import { AppHeader } from '../components/layout/AppHeader';
 import { SaveProjectModal } from '../components/layout/SaveProjectModal';
 import { LoginPromptModal } from '../components/layout/LoginPromptModal';
+import { GitHubStarBanner } from '../components/layout/GitHubStarBanner';
 import { useSimulatorStore } from '../store/useSimulatorStore';
 import { useOscilloscopeStore } from '../store/useOscilloscopeStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -40,21 +47,73 @@ const resizeHandleStyle: React.CSSProperties = {
 };
 
 export const EditorPage: React.FC = () => {
+  useSEO({
+    title: 'Multi-Board Simulator Editor — Arduino, ESP32, RP2040, RISC-V | Velxio',
+    description:
+      'Write, compile and simulate Arduino, ESP32, Raspberry Pi Pico, ESP32-C3, and Raspberry Pi 3 code in your browser. 19 boards, 5 CPU architectures, 48+ components. Free and open-source.',
+    url: 'https://velxio.dev/editor',
+  });
+
   const [editorWidthPct, setEditorWidthPct] = useState(45);
   const containerRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
   const serialMonitorOpen = useSimulatorStore((s) => s.serialMonitorOpen);
+  const activeBoardId = useSimulatorStore((s) => s.activeBoardId);
+  const activeBoardKind = useSimulatorStore((s) =>
+    s.boards.find((b) => b.id === s.activeBoardId)?.boardKind
+  );
+  const isRaspberryPi3 = activeBoardKind === 'raspberry-pi-3';
   const oscilloscopeOpen = useOscilloscopeStore((s) => s.open);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [compileLogs, setCompileLogs] = useState<CompilationLog[]>([]);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [loginPromptOpen, setLoginPromptOpen] = useState(false);
+  const [showStarBanner, setShowStarBanner] = useState(false);
+
+  // ── GitHub star prompt (show once: 2nd visit OR after 3 min) ──────────────
+  useEffect(() => {
+    const STAR_KEY = 'velxio_star_prompted';
+    const VISITS_KEY = 'velxio_editor_visits';
+    const FIRST_VISIT_KEY = 'velxio_editor_first_visit';
+    const THREE_MIN = 3 * 60 * 1000;
+
+    if (localStorage.getItem(STAR_KEY)) return;
+
+    // Increment visit counter
+    const visits = parseInt(localStorage.getItem(VISITS_KEY) ?? '0', 10) + 1;
+    localStorage.setItem(VISITS_KEY, String(visits));
+
+    // Record timestamp of first visit
+    if (!localStorage.getItem(FIRST_VISIT_KEY)) {
+      localStorage.setItem(FIRST_VISIT_KEY, String(Date.now()));
+    }
+    const firstVisit = parseInt(localStorage.getItem(FIRST_VISIT_KEY)!, 10);
+
+    // Show immediately on second+ visit
+    if (visits >= 2) {
+      setShowStarBanner(true);
+      return;
+    }
+
+    // Otherwise schedule after the 3-minute mark
+    const elapsed = Date.now() - firstVisit;
+    const delay = Math.max(0, THREE_MIN - elapsed);
+    const timer = setTimeout(() => {
+      if (!localStorage.getItem(STAR_KEY)) setShowStarBanner(true);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleDismissStarBanner = () => {
+    localStorage.setItem('velxio_star_prompted', '1');
+    setShowStarBanner(false);
+  };
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches);
-  // Default to 'circuit' on mobile — the visual simulation is the primary content
-  const [mobileView, setMobileView] = useState<'code' | 'circuit'>('circuit');
+  // Default to 'code' on mobile — show the editor so users can write/view code
+  const [mobileView, setMobileView] = useState<'code' | 'circuit'>('code');
   const user = useAuthStore((s) => s.user);
 
   const handleSaveClick = useCallback(() => {
@@ -174,6 +233,34 @@ export const EditorPage: React.FC = () => {
     <div className="app">
       <AppHeader />
 
+      {/* ── Mobile tab bar (top, above panels) ── */}
+      {isMobile && (
+        <nav className="mobile-tab-bar">
+          <button
+            className={`mobile-tab-btn${mobileView === 'code' ? ' mobile-tab-btn--active' : ''}`}
+            onClick={() => setMobileView('code')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            <span>&lt;/&gt; Code</span>
+          </button>
+          <button
+            className={`mobile-tab-btn${mobileView === 'circuit' ? ' mobile-tab-btn--active' : ''}`}
+            onClick={() => setMobileView('circuit')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+              <line x1="12" y1="12" x2="12" y2="16" />
+              <line x1="10" y1="14" x2="14" y2="14" />
+            </svg>
+            <span>Circuit</span>
+          </button>
+        </nav>
+      )}
+
       <div className="app-container" ref={containerRef}>
         {/* ── Editor side ── */}
         <div
@@ -219,12 +306,18 @@ export const EditorPage: React.FC = () => {
               </div>
             </div>
 
-            {/* File tabs */}
-            <FileTabs />
+            {/* File tabs — hidden when Pi workspace is active */}
+            {!isRaspberryPi3 && <FileTabs />}
 
-            {/* Monaco editor */}
+            {/* Editor area: Pi workspace or Monaco editor */}
             <div className="editor-wrapper" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-              <CodeEditor />
+              {isRaspberryPi3 && activeBoardId ? (
+                <Suspense fallback={<div style={{ color: '#666', padding: 16, fontSize: 12 }}>Loading Pi workspace…</div>}>
+                  <RaspberryPiWorkspace boardId={activeBoardId} />
+                </Suspense>
+              ) : (
+                <CodeEditor />
+              )}
             </div>
 
             {/* Console */}
@@ -294,36 +387,9 @@ export const EditorPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Mobile tab bar ── */}
-      {isMobile && (
-        <nav className="mobile-tab-bar">
-          <button
-            className={`mobile-tab-btn${mobileView === 'code' ? ' mobile-tab-btn--active' : ''}`}
-            onClick={() => setMobileView('code')}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="16 18 22 12 16 6" />
-              <polyline points="8 6 2 12 8 18" />
-            </svg>
-            <span>Code</span>
-          </button>
-          <button
-            className={`mobile-tab-btn${mobileView === 'circuit' ? ' mobile-tab-btn--active' : ''}`}
-            onClick={() => setMobileView('circuit')}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="7" width="20" height="14" rx="2" />
-              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
-              <line x1="12" y1="12" x2="12" y2="16" />
-              <line x1="10" y1="14" x2="14" y2="14" />
-            </svg>
-            <span>Circuit</span>
-          </button>
-        </nav>
-      )}
-
       {saveModalOpen && <SaveProjectModal onClose={() => setSaveModalOpen(false)} />}
       {loginPromptOpen && <LoginPromptModal onClose={() => setLoginPromptOpen(false)} />}
+      {showStarBanner && <GitHubStarBanner onClose={handleDismissStarBanner} />}
     </div>
   );
 };

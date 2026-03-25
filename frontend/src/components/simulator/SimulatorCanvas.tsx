@@ -1,29 +1,40 @@
-import { useSimulatorStore, BOARD_LABELS } from '../../store/useSimulatorStore';
-import type { BoardType } from '../../store/useSimulatorStore';
+import { useSimulatorStore, getEsp32Bridge } from '../../store/useSimulatorStore';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { ArduinoUno } from '../components-wokwi/ArduinoUno';
-import { ArduinoNano } from '../components-wokwi/ArduinoNano';
-import { ArduinoMega } from '../components-wokwi/ArduinoMega';
-import { NanoRP2040 } from '../components-wokwi/NanoRP2040';
+import { ESP32_ADC_PIN_MAP } from '../components-wokwi/Esp32Element';
 import { ComponentPickerModal } from '../ComponentPickerModal';
 import { ComponentPropertyDialog } from './ComponentPropertyDialog';
+import { SensorControlPanel } from './SensorControlPanel';
+import { SENSOR_CONTROLS } from '../../simulation/sensorControlConfig';
 import { DynamicComponent, createComponentFromMetadata } from '../DynamicComponent';
 import { ComponentRegistry } from '../../services/ComponentRegistry';
 import { PinSelector } from './PinSelector';
 import { WireLayer } from './WireLayer';
-import { PinOverlay } from './PinOverlay';
+import type { SegmentHandle } from './WireLayer';
+import { BoardOnCanvas } from './BoardOnCanvas';
 import { PartSimulationRegistry } from '../../simulation/parts';
+import { PinOverlay } from './PinOverlay';
 import { isBoardComponent, boardPinToNumber } from '../../utils/boardPinMapping';
+import { autoWireColor, WIRE_KEY_COLORS } from '../../utils/wireUtils';
+import {
+  findWireNearPoint,
+  getRenderedPoints,
+  getRenderedSegments,
+  moveSegment,
+  renderedToWaypoints,
+  renderedPointsToPath,
+} from '../../utils/wireHitDetection';
 import type { ComponentMetadata } from '../../types/component-metadata';
+import type { BoardKind } from '../../types/board';
+import { BOARD_KIND_LABELS } from '../../types/board';
 import { useOscilloscopeStore } from '../../store/useOscilloscopeStore';
 import './SimulatorCanvas.css';
 
 export const SimulatorCanvas = () => {
   const {
-    boardType,
-    setBoardType,
-    boardPosition,
+    boards,
+    activeBoardId,
     setBoardPosition,
+    addBoard,
     components,
     running,
     pinManager,
@@ -36,17 +47,32 @@ export const SimulatorCanvas = () => {
     toggleSerialMonitor,
   } = useSimulatorStore();
 
+  // Legacy derived values for components that still use them
+  const boardType = useSimulatorStore((s) => s.boardType);
+  const boardPosition = useSimulatorStore((s) => s.boardPosition);
+
   // Wire management from store
   const startWireCreation = useSimulatorStore((s) => s.startWireCreation);
   const updateWireInProgress = useSimulatorStore((s) => s.updateWireInProgress);
+  const addWireWaypoint = useSimulatorStore((s) => s.addWireWaypoint);
+  const setWireInProgressColor = useSimulatorStore((s) => s.setWireInProgressColor);
   const finishWireCreation = useSimulatorStore((s) => s.finishWireCreation);
   const cancelWireCreation = useSimulatorStore((s) => s.cancelWireCreation);
   const wireInProgress = useSimulatorStore((s) => s.wireInProgress);
   const recalculateAllWirePositions = useSimulatorStore((s) => s.recalculateAllWirePositions);
+  const selectedWireId = useSimulatorStore((s) => s.selectedWireId);
+  const setSelectedWire = useSimulatorStore((s) => s.setSelectedWire);
+  const removeWire = useSimulatorStore((s) => s.removeWire);
+  const updateWire = useSimulatorStore((s) => s.updateWire);
+  const wires = useSimulatorStore((s) => s.wires);
 
   // Oscilloscope
   const oscilloscopeOpen = useOscilloscopeStore((s) => s.open);
   const toggleOscilloscope = useOscilloscopeStore((s) => s.toggleOscilloscope);
+
+  // ESP32 crash notification
+  const esp32CrashBoardId = useSimulatorStore((s) => s.esp32CrashBoardId);
+  const dismissEsp32Crash = useSimulatorStore((s) => s.dismissEsp32Crash);
 
   // Component picker modal
   const [showComponentPicker, setShowComponentPicker] = useState(false);
@@ -69,6 +95,10 @@ export const SimulatorCanvas = () => {
   const [showPropertyDialog, setShowPropertyDialog] = useState(false);
   const [propertyDialogComponentId, setPropertyDialogComponentId] = useState<string | null>(null);
   const [propertyDialogPosition, setPropertyDialogPosition] = useState({ x: 0, y: 0 });
+
+  // Sensor control panel (shown instead of property dialog for sensor components during simulation)
+  const [sensorControlComponentId, setSensorControlComponentId] = useState<string | null>(null);
+  const [sensorControlMetadataId, setSensorControlMetadataId] = useState<string | null>(null);
 
   // Click vs drag detection
   const [clickStartTime, setClickStartTime] = useState<number>(0);
@@ -99,6 +129,37 @@ export const SimulatorCanvas = () => {
   const boardPositionRef = useRef(boardPosition);
   boardPositionRef.current = boardPosition;
 
+  // Wire interaction state (canvas-level hit detection — bypasses SVG pointer-events issues)
+  const [hoveredWireId, setHoveredWireId] = useState<string | null>(null);
+  const [segmentDragPreview, setSegmentDragPreview] = useState<{
+    wireId: string;
+    overridePath: string;
+  } | null>(null);
+  const segmentDragRef = useRef<{
+    wireId: string;
+    segIndex: number;
+    axis: 'horizontal' | 'vertical';
+    renderedPts: { x: number; y: number }[];
+    isDragging: boolean;
+  } | null>(null);
+  /** Set to true during mouseup if a segment drag committed, so onClick can skip selection. */
+  const segmentDragJustCommittedRef = useRef(false);
+  const wiresRef = useRef(wires);
+  wiresRef.current = wires;
+
+  // Compute midpoint handles for the selected wire's segments
+  const segmentHandles = React.useMemo<SegmentHandle[]>(() => {
+    if (!selectedWireId) return [];
+    const wire = wires.find((w) => w.id === selectedWireId);
+    if (!wire) return [];
+    return getRenderedSegments(wire).map((seg, i) => ({
+      segIndex: i,
+      axis: seg.axis,
+      mx: (seg.x1 + seg.x2) / 2,
+      my: (seg.y1 + seg.y2) / 2,
+    }));
+  }, [selectedWireId, wires]);
+
   // Touch-specific state refs (for single-finger drag and pinch-to-zoom)
   const touchDraggedComponentIdRef = useRef<string | null>(null);
   const touchDragOffsetRef = useRef({ x: 0, y: 0 });
@@ -108,6 +169,15 @@ export const SimulatorCanvas = () => {
   const pinchStartZoomRef = useRef(1);
   const pinchStartMidRef = useRef({ x: 0, y: 0 });
   const pinchStartPanRef = useRef({ x: 0, y: 0 });
+
+  // Refs for touch-based wire creation, selection, and interactive passthrough
+  const wireInProgressRef = useRef(wireInProgress);
+  wireInProgressRef.current = wireInProgress;
+  const selectedWireIdRef = useRef(selectedWireId);
+  selectedWireIdRef.current = selectedWireId;
+  const touchPassthroughRef = useRef(false);
+  const touchOnPinRef = useRef(false);
+  const lastTapTimeRef = useRef(0);
 
   // Convert viewport coords to world (canvas) coords
   const toWorld = useCallback((screenX: number, screenY: number) => {
@@ -123,6 +193,20 @@ export const SimulatorCanvas = () => {
   useEffect(() => {
     initSimulator();
   }, [initSimulator]);
+
+  // Auto-start/stop Pi bridges when simulation state changes
+  const startBoard = useSimulatorStore((s) => s.startBoard);
+  const stopBoard = useSimulatorStore((s) => s.stopBoard);
+  useEffect(() => {
+    const remoteBoards = boards.filter(
+      (b) => b.boardKind === 'raspberry-pi-3' ||
+             b.boardKind === 'esp32' || b.boardKind === 'esp32-s3' || b.boardKind === 'esp32-c3'
+    );
+    remoteBoards.forEach((b) => {
+      if (running && !b.running) startBoard(b.id);
+      else if (!running && b.running) stopBoard(b.id);
+    });
+  }, [running, boards, startBoard, stopBoard]);
 
   // Attach wheel listener as non-passive so preventDefault() works
   useEffect(() => {
@@ -148,18 +232,24 @@ export const SimulatorCanvas = () => {
   }, []);
 
   // Attach touch listeners as non-passive so preventDefault() works, enabling
-  // single-finger pan, single-finger component drag, and two-finger pinch-to-zoom.
+  // single-finger pan, component drag, wire creation/selection, and two-finger pinch-to-zoom.
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
 
     const onTouchStart = (e: TouchEvent) => {
-      e.preventDefault(); // Prevent browser scroll / mouse-event synthesis
-
-      pinchStartDistRef.current = 0; // Reset pinch state on each new gesture
+      // Reset per-gesture flags
+      touchOnPinRef.current = false;
+      touchPassthroughRef.current = false;
+      pinchStartDistRef.current = 0;
 
       if (e.touches.length === 2) {
-        // ── Two-finger pinch: cancel any active drag/pan and prepare zoom ──
+        e.preventDefault();
+        // Cancel wire in progress on two-finger gesture
+        if (wireInProgressRef.current) {
+          useSimulatorStore.getState().cancelWireCreation();
+        }
+        // Cancel any active drag/pan and prepare zoom
         isPanningRef.current = false;
         touchDraggedComponentIdRef.current = null;
 
@@ -179,16 +269,47 @@ export const SimulatorCanvas = () => {
 
       if (e.touches.length !== 1) return;
       const touch = e.touches[0];
-      touchClickStartTimeRef.current = Date.now();
-      touchClickStartPosRef.current = { x: touch.clientX, y: touch.clientY };
 
       // Identify what element was touched
       const target = document.elementFromPoint(touch.clientX, touch.clientY);
+
+      // ── 1. Pin overlay → let pin's onTouchEnd React handler call handlePinClick ──
+      if (target?.closest('[data-pin-overlay]')) {
+        e.preventDefault();
+        touchOnPinRef.current = true;
+        return;
+      }
+
+      // ── 2. Interactive web component during simulation → let browser synthesize mouse events ──
+      //    (potentiometer knobs, button presses, etc. need mousedown/mouseup synthesis)
+      //    touch-action:none on .canvas-content already prevents browser scroll/zoom.
+      if (runningRef.current) {
+        const webComp = target?.closest('.web-component-container');
+        if (webComp) {
+          touchPassthroughRef.current = true;
+          // Don't preventDefault → browser synthesizes mouse events for the component
+          return;
+        }
+      }
+
+      e.preventDefault();
+
+      touchClickStartTimeRef.current = Date.now();
+      touchClickStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+
+      // ── 3. Wire in progress → track for waypoint, update preview ──
+      if (wireInProgressRef.current) {
+        const world = toWorld(touch.clientX, touch.clientY);
+        useSimulatorStore.getState().updateWireInProgress(world.x, world.y);
+        // Don't start pan/drag — let touchmove update wire preview, touchend add waypoint
+        return;
+      }
+
+      // ── 4. Component detection ──
       const componentWrapper = target?.closest('[data-component-id]') as HTMLElement | null;
       const boardOverlay = target?.closest('[data-board-overlay]') as HTMLElement | null;
 
-      if (componentWrapper && !runningRef.current) {
-        // ── Single finger on a component: start drag ──
+      if (componentWrapper) {
         const componentId = componentWrapper.getAttribute('data-component-id');
         if (componentId) {
           const component = componentsRef.current.find((c) => c.id === componentId);
@@ -203,16 +324,29 @@ export const SimulatorCanvas = () => {
           }
         }
       } else if (boardOverlay && !runningRef.current) {
-        // ── Single finger on the board overlay: start board drag ──
-        const board = boardPositionRef.current;
-        const world = toWorld(touch.clientX, touch.clientY);
-        touchDraggedComponentIdRef.current = '__board__';
-        touchDragOffsetRef.current = {
-          x: world.x - board.x,
-          y: world.y - board.y,
-        };
+        // ── 5. Board overlay: use multi-board path ──
+        const boardId = boardOverlay.getAttribute('data-board-id');
+        const storeBoards = useSimulatorStore.getState().boards;
+        const boardInstance = boardId ? storeBoards.find(b => b.id === boardId) : null;
+        if (boardInstance) {
+          const world = toWorld(touch.clientX, touch.clientY);
+          touchDraggedComponentIdRef.current = `__board__:${boardId}`;
+          touchDragOffsetRef.current = {
+            x: world.x - boardInstance.x,
+            y: world.y - boardInstance.y,
+          };
+        } else {
+          // Fallback to legacy single board
+          const board = boardPositionRef.current;
+          const world = toWorld(touch.clientX, touch.clientY);
+          touchDraggedComponentIdRef.current = '__board__';
+          touchDragOffsetRef.current = {
+            x: world.x - board.x,
+            y: world.y - board.y,
+          };
+        }
       } else {
-        // ── Single finger on empty canvas: start pan ──
+        // ── 6. Empty canvas → start pan ──
         isPanningRef.current = true;
         panStartRef.current = {
           mouseX: touch.clientX,
@@ -224,6 +358,11 @@ export const SimulatorCanvas = () => {
     };
 
     const onTouchMove = (e: TouchEvent) => {
+      // Let interactive components handle their own touch (potentiometer drag, etc.)
+      if (touchPassthroughRef.current) return;
+      // Pin touch: no move processing needed
+      if (touchOnPinRef.current) { e.preventDefault(); return; }
+
       e.preventDefault();
 
       if (e.touches.length === 2 && pinchStartDistRef.current > 0) {
@@ -256,6 +395,13 @@ export const SimulatorCanvas = () => {
       if (e.touches.length !== 1) return;
       const touch = e.touches[0];
 
+      // ── Wire preview: update position as finger moves ──
+      if (wireInProgressRef.current && !isPanningRef.current && !touchDraggedComponentIdRef.current) {
+        const world = toWorld(touch.clientX, touch.clientY);
+        useSimulatorStore.getState().updateWireInProgress(world.x, world.y);
+        return;
+      }
+
       if (isPanningRef.current) {
         // ── Single finger pan ──
         const dx = touch.clientX - panStartRef.current.mouseX;
@@ -272,13 +418,20 @@ export const SimulatorCanvas = () => {
       } else if (touchDraggedComponentIdRef.current) {
         // ── Single finger component/board drag ──
         const world = toWorld(touch.clientX, touch.clientY);
-        if (touchDraggedComponentIdRef.current === '__board__') {
+        const touchId = touchDraggedComponentIdRef.current;
+        if (touchId && touchId.startsWith('__board__:')) {
+          const boardId = touchId.slice('__board__:'.length);
+          setBoardPosition({
+            x: world.x - touchDragOffsetRef.current.x,
+            y: world.y - touchDragOffsetRef.current.y,
+          }, boardId);
+        } else if (touchId === '__board__') {
           setBoardPosition({
             x: world.x - touchDragOffsetRef.current.x,
             y: world.y - touchDragOffsetRef.current.y,
           });
         } else {
-          updateComponent(touchDraggedComponentIdRef.current, {
+          updateComponent(touchDraggedComponentIdRef.current!, {
             x: world.x - touchDragOffsetRef.current.x,
             y: world.y - touchDragOffsetRef.current.y,
           } as any);
@@ -287,6 +440,18 @@ export const SimulatorCanvas = () => {
     };
 
     const onTouchEnd = (e: TouchEvent) => {
+      // Let interactive components handle their own touch
+      if (touchPassthroughRef.current) {
+        touchPassthroughRef.current = false;
+        return;
+      }
+      // Pin touch: let pin's onTouchEnd React handler deal with it
+      if (touchOnPinRef.current) {
+        touchOnPinRef.current = false;
+        e.preventDefault();
+        return;
+      }
+
       e.preventDefault();
 
       // ── Finish pinch zoom: commit values to React state ──
@@ -299,29 +464,50 @@ export const SimulatorCanvas = () => {
       if (e.touches.length > 0) return; // Still fingers on screen
 
       // ── Finish panning ──
+      let wasPanning = false;
       if (isPanningRef.current) {
         isPanningRef.current = false;
         setPan({ ...panRef.current });
+        wasPanning = true;
+        // Don't return — fall through so short taps can select wires
       }
 
       const changed = e.changedTouches[0];
+      if (!changed) return;
+
+      const elapsed = Date.now() - touchClickStartTimeRef.current;
+      const dx = changed.clientX - touchClickStartPosRef.current.x;
+      const dy = changed.clientY - touchClickStartPosRef.current.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const isShortTap = dist < 10 && elapsed < 400;
+
+      // If we actually panned (moved significantly), don't process as tap
+      if (wasPanning && !isShortTap) return;
 
       // ── Finish component/board drag ──
       if (touchDraggedComponentIdRef.current) {
-        const elapsed = Date.now() - touchClickStartTimeRef.current;
-        const dx = changed ? changed.clientX - touchClickStartPosRef.current.x : 0;
-        const dy = changed ? changed.clientY - touchClickStartPosRef.current.y : 0;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const touchId = touchDraggedComponentIdRef.current;
 
-        // Short tap with minimal movement → open property dialog
-        if (dist < 5 && elapsed < 300 && touchDraggedComponentIdRef.current !== '__board__') {
-          const component = componentsRef.current.find(
-            (c) => c.id === touchDraggedComponentIdRef.current
-          );
-          if (component) {
-            setPropertyDialogComponentId(touchDraggedComponentIdRef.current);
-            setPropertyDialogPosition({ x: component.x, y: component.y });
-            setShowPropertyDialog(true);
+        if (isShortTap) {
+          if (touchId.startsWith('__board__:')) {
+            // Short tap on board → make it the active board
+            const boardId = touchId.slice('__board__:'.length);
+            useSimulatorStore.getState().setActiveBoardId(boardId);
+          } else if (touchId !== '__board__') {
+            // Short tap on component → open property dialog or sensor panel
+            const component = componentsRef.current.find(
+              (c) => c.id === touchId
+            );
+            if (component) {
+              if (runningRef.current && SENSOR_CONTROLS[component.metadataId] !== undefined) {
+                setSensorControlComponentId(touchId);
+                setSensorControlMetadataId(component.metadataId);
+              } else {
+                setPropertyDialogComponentId(touchId);
+                setPropertyDialogPosition({ x: component.x, y: component.y });
+                setShowPropertyDialog(true);
+              }
+            }
           }
         }
 
@@ -330,13 +516,36 @@ export const SimulatorCanvas = () => {
         return;
       }
 
-      // ── Short tap on empty canvas: deselect ──
-      if (changed) {
-        const elapsed = Date.now() - touchClickStartTimeRef.current;
-        const dx = changed.clientX - touchClickStartPosRef.current.x;
-        const dy = changed.clientY - touchClickStartPosRef.current.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 5 && elapsed < 300) {
+      // ── Wire in progress: short tap adds waypoint ──
+      if (wireInProgressRef.current) {
+        if (isShortTap) {
+          const world = toWorld(changed.clientX, changed.clientY);
+          useSimulatorStore.getState().addWireWaypoint(world.x, world.y);
+        }
+        return;
+      }
+
+      // ── Short tap on empty canvas: wire selection + double-tap wire deletion ──
+      if (isShortTap) {
+        const now = Date.now();
+        const world = toWorld(changed.clientX, changed.clientY);
+        const threshold = 8 / zoomRef.current;
+        const wire = findWireNearPoint(wiresRef.current, world.x, world.y, threshold);
+
+        // Double-tap → delete wire
+        const timeSinceLastTap = now - lastTapTimeRef.current;
+        if (timeSinceLastTap < 350 && wire) {
+          useSimulatorStore.getState().removeWire(wire.id);
+          lastTapTimeRef.current = 0;
+          return;
+        }
+        lastTapTimeRef.current = now;
+
+        if (wire) {
+          const curr = selectedWireIdRef.current;
+          useSimulatorStore.getState().setSelectedWire(curr === wire.id ? null : wire.id);
+        } else {
+          useSimulatorStore.getState().setSelectedWire(null);
           setSelectedComponentId(null);
         }
       }
@@ -367,25 +576,41 @@ export const SimulatorCanvas = () => {
 
     // Helper to add subscription
     const subscribeComponentToPin = (component: any, pin: number, componentPinName?: string) => {
+      // Components with attachEvents in PartSimulationRegistry manage their own
+      // visual state (e.g. servo, buzzer). Skip generic digital/PWM updates for them
+      // to avoid flickering from raw PWM pulses being misinterpreted as on/off state.
+      const logic = PartSimulationRegistry.get(component.metadataId);
+      const hasSelfManagedVisuals = !!(logic && logic.attachEvents);
+
       const unsubscribe = pinManager.onPinChange(
         pin,
         (_pin, state) => {
-          // 1. Update React state for standard properties
-          updateComponentState(component.id, state);
+          if (!hasSelfManagedVisuals) {
+            // 1. Update React state for standard properties (LEDs, buttons, etc.)
+            updateComponentState(component.id, state);
+          }
 
           // 2. Delegate to PartSimulationRegistry for custom visual updates
-          const logic = PartSimulationRegistry.get(component.metadataId);
           if (logic && logic.onPinStateChange) {
             const el = document.getElementById(component.id);
             if (el) {
               logic.onPinStateChange(componentPinName || 'A', state, el);
             }
           }
-
-          console.log(`Component ${component.id} on pin ${pin}: ${state ? 'HIGH' : 'LOW'}`);
         }
       );
       unsubscribers.push(unsubscribe);
+
+      // PWM subscription: update LED opacity when the pin receives a PWM duty cycle.
+      // Skip for self-managed components (servo, buzzer) — their duty cycle is a
+      // control signal, not a brightness value, so setting opacity would cause flicker.
+      if (!hasSelfManagedVisuals) {
+        const pwmUnsub = pinManager.onPwmChange(pin, (_p, duty) => {
+          const el = document.getElementById(component.id);
+          if (el) el.style.opacity = duty > 0 ? String(duty) : '';
+        });
+        unsubscribers.push(pwmUnsub);
+      }
     };
 
     components.forEach((component) => {
@@ -394,7 +619,7 @@ export const SimulatorCanvas = () => {
         subscribeComponentToPin(component, component.properties.pin as number, 'A');
       } else {
         // 2. Subscribe by finding wires connected to arduino
-        const connectedWires = useSimulatorStore.getState().wires.filter(
+        const connectedWires = wires.filter(
           w => w.start.componentId === component.id || w.end.componentId === component.id
         );
 
@@ -404,10 +629,22 @@ export const SimulatorCanvas = () => {
           const otherEndpoint = isStartSelf ? wire.end : wire.start;
 
           if (isBoardComponent(otherEndpoint.componentId)) {
-            const pin = boardPinToNumber(otherEndpoint.componentId, otherEndpoint.pinName);
-            if (pin !== null) {
+            // Use the board's actual boardKind (not just its instance ID) so that
+            // a board whose ID is 'arduino-uno' but whose kind is 'esp32' gets the
+            // correct GPIO mapping ('GPIO4' → 4, not null).
+            const boardInstance = boards.find(b => b.id === otherEndpoint.componentId);
+            const lookupKey = boardInstance ? boardInstance.boardKind : otherEndpoint.componentId;
+            const pin = boardPinToNumber(lookupKey, otherEndpoint.pinName);
+            console.log(
+              `[WirePin] component=${component.id} board=${otherEndpoint.componentId}` +
+              ` kind=${lookupKey} pinName=${otherEndpoint.pinName} → gpioPin=${pin}`
+            );
+            if (pin !== null && pin >= 0) {
               subscribeComponentToPin(component, pin, selfEndpoint.pinName);
+            } else if (pin === null) {
+              console.warn(`[WirePin] Could not resolve pin "${otherEndpoint.pinName}" on ${lookupKey}`);
             }
+            // pin === -1 → power/GND pin, skip silently
           }
         });
       }
@@ -416,7 +653,71 @@ export const SimulatorCanvas = () => {
     return () => {
       unsubscribers.forEach(unsub => unsub());
     };
-  }, [components, pinManager, updateComponentState]);
+  }, [components, wires, boards, pinManager, updateComponentState]);
+
+  // ESP32 input components: forward button presses and potentiometer values to QEMU
+  useEffect(() => {
+    const cleanups: (() => void)[] = [];
+
+    components.forEach((component) => {
+      const connectedWires = wires.filter(
+        w => w.start.componentId === component.id || w.end.componentId === component.id
+      );
+
+      connectedWires.forEach(wire => {
+        const isStartSelf = wire.start.componentId === component.id;
+        const selfEndpoint  = isStartSelf ? wire.start : wire.end;
+        const otherEndpoint = isStartSelf ? wire.end   : wire.start;
+
+        if (!isBoardComponent(otherEndpoint.componentId)) return;
+
+        const boardId  = otherEndpoint.componentId;
+        const bridge   = getEsp32Bridge(boardId);
+        if (!bridge) return;  // not an ESP32 board
+
+        const boardInstance = boards.find(b => b.id === boardId);
+        const lookupKey = boardInstance ? boardInstance.boardKind : boardId;
+        const gpioPin = boardPinToNumber(lookupKey, otherEndpoint.pinName);
+        if (gpioPin === null) return;
+
+        // Delay lookup so the web component has time to render
+        const timeout = setTimeout(() => {
+          const el = document.getElementById(component.id);
+          if (!el) return;
+          const tag = el.tagName.toLowerCase();
+
+          // Push-button: forward press/release as GPIO level changes
+          if (tag === 'wokwi-pushbutton') {
+            const onPress   = () => bridge.sendPinEvent(gpioPin, true);
+            const onRelease = () => bridge.sendPinEvent(gpioPin, false);
+            el.addEventListener('button-press',   onPress);
+            el.addEventListener('button-release', onRelease);
+            cleanups.push(() => {
+              el.removeEventListener('button-press',   onPress);
+              el.removeEventListener('button-release', onRelease);
+            });
+          }
+
+          // Potentiometer: forward analog value as ADC millivolts
+          if (tag === 'wokwi-potentiometer' && selfEndpoint.pinName === 'SIG') {
+            const adcInfo = ESP32_ADC_PIN_MAP[gpioPin];
+            if (adcInfo) {
+              const onInput = (e: Event) => {
+                const pct = parseFloat((e.target as any).value ?? '0');  // 0–100
+                bridge.setAdc(adcInfo.chn, Math.round(pct / 100 * 3300));
+              };
+              el.addEventListener('input', onInput);
+              cleanups.push(() => el.removeEventListener('input', onInput));
+            }
+          }
+        }, 300);
+
+        cleanups.push(() => clearTimeout(timeout));
+      });
+    });
+
+    return () => cleanups.forEach(fn => fn());
+  }, [components, wires, boards]);
 
   // Handle keyboard delete
   useEffect(() => {
@@ -520,14 +821,15 @@ export const SimulatorCanvas = () => {
       return;
     }
 
-    // Handle component dragging
+    // Handle component/board dragging
     if (draggedComponentId) {
       const world = toWorld(e.clientX, e.clientY);
-      if (draggedComponentId === '__board__') {
-        setBoardPosition({
-          x: world.x - dragOffset.x,
-          y: world.y - dragOffset.y,
-        });
+      if (draggedComponentId.startsWith('__board__:')) {
+        const boardId = draggedComponentId.slice('__board__:'.length);
+        setBoardPosition({ x: world.x - dragOffset.x, y: world.y - dragOffset.y }, boardId);
+      } else if (draggedComponentId === '__board__') {
+        // legacy fallback
+        setBoardPosition({ x: world.x - dragOffset.x, y: world.y - dragOffset.y });
       } else {
         updateComponent(draggedComponentId, {
           x: world.x - dragOffset.x,
@@ -540,6 +842,27 @@ export const SimulatorCanvas = () => {
     if (wireInProgress) {
       const world = toWorld(e.clientX, e.clientY);
       updateWireInProgress(world.x, world.y);
+      return;
+    }
+
+    // Handle segment handle dragging
+    if (segmentDragRef.current) {
+      const world = toWorld(e.clientX, e.clientY);
+      const sd = segmentDragRef.current;
+      sd.isDragging = true;
+      const newValue = sd.axis === 'horizontal' ? world.y : world.x;
+      const newPts = moveSegment(sd.renderedPts, sd.segIndex, sd.axis, newValue);
+      const overridePath = renderedPointsToPath(newPts);
+      setSegmentDragPreview({ wireId: sd.wireId, overridePath });
+      return;
+    }
+
+    // Wire hover detection (when not dragging anything)
+    if (!draggedComponentId) {
+      const world = toWorld(e.clientX, e.clientY);
+      const threshold = 8 / zoomRef.current;
+      const wire = findWireNearPoint(wiresRef.current, world.x, world.y, threshold);
+      setHoveredWireId(wire ? wire.id : null);
     }
   };
 
@@ -551,6 +874,21 @@ export const SimulatorCanvas = () => {
       return;
     }
 
+    // Commit segment handle drag
+    if (segmentDragRef.current) {
+      const sd = segmentDragRef.current;
+      if (sd.isDragging) {
+        segmentDragJustCommittedRef.current = true;
+        const world = toWorld(e.clientX, e.clientY);
+        const newValue = sd.axis === 'horizontal' ? world.y : world.x;
+        const newPts = moveSegment(sd.renderedPts, sd.segIndex, sd.axis, newValue);
+        updateWire(sd.wireId, { waypoints: renderedToWaypoints(newPts) });
+      }
+      segmentDragRef.current = null;
+      setSegmentDragPreview(null);
+      return;
+    }
+
     if (draggedComponentId) {
       const timeDiff = Date.now() - clickStartTime;
       const posDiff = Math.sqrt(
@@ -558,12 +896,24 @@ export const SimulatorCanvas = () => {
         Math.pow(e.clientY - clickStartPos.y, 2)
       );
 
-      if (posDiff < 5 && timeDiff < 300 && draggedComponentId !== '__board__') {
-        const component = components.find((c) => c.id === draggedComponentId);
-        if (component) {
-          setPropertyDialogComponentId(draggedComponentId);
-          setPropertyDialogPosition({ x: component.x, y: component.y });
-          setShowPropertyDialog(true);
+      if (posDiff < 5 && timeDiff < 300) {
+        if (draggedComponentId.startsWith('__board__:')) {
+          // Click on a board — make it the active board (editor switches to its code)
+          const boardId = draggedComponentId.slice('__board__:'.length);
+          useSimulatorStore.getState().setActiveBoardId(boardId);
+        } else if (draggedComponentId !== '__board__') {
+          const component = components.find((c) => c.id === draggedComponentId);
+          if (component) {
+            // During simulation: sensor components show the SensorControlPanel
+            if (running && SENSOR_CONTROLS[component.metadataId] !== undefined) {
+              setSensorControlComponentId(draggedComponentId);
+              setSensorControlMetadataId(component.metadataId);
+            } else {
+              setPropertyDialogComponentId(draggedComponentId);
+              setPropertyDialogPosition({ x: component.x, y: component.y });
+              setShowPropertyDialog(true);
+            }
+          }
         }
       }
 
@@ -585,6 +935,29 @@ export const SimulatorCanvas = () => {
       };
     }
   };
+
+  // Handle mousedown on a segment handle circle (called from WireLayer)
+  const handleHandleMouseDown = useCallback(
+    (e: React.MouseEvent, segIndex: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!selectedWireId) return;
+      const wire = wiresRef.current.find((w) => w.id === selectedWireId);
+      if (!wire) return;
+      const segments = getRenderedSegments(wire);
+      const seg = segments[segIndex];
+      if (!seg) return;
+      const expandedPts = getRenderedPoints(wire);
+      segmentDragRef.current = {
+        wireId: wire.id,
+        segIndex,
+        axis: seg.axis,
+        renderedPts: expandedPts,
+        isDragging: false,
+      };
+    },
+    [selectedWireId],
+  );
 
   // Zoom centered on cursor
   const handleWheel = (e: React.WheelEvent) => {
@@ -626,35 +999,41 @@ export const SimulatorCanvas = () => {
     }
 
     if (wireInProgress) {
-      // Finish wire creation
-      finishWireCreation({
-        componentId,
-        pinName,
-        x,
-        y,
-      });
+      // Finish wire: connect to this pin
+      finishWireCreation({ componentId, pinName, x, y });
     } else {
-      // Start wire creation
-      startWireCreation({
-        componentId,
-        pinName,
-        x,
-        y,
-      });
+      // Start wire: auto-detect color from pin name
+      startWireCreation({ componentId, pinName, x, y }, autoWireColor(pinName));
     }
   };
 
   // Keyboard handlers for wires
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape → cancel in-progress wire
       if (e.key === 'Escape' && wireInProgress) {
         cancelWireCreation();
+        return;
+      }
+      // Delete / Backspace → remove selected wire
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedWireId) {
+        removeWire(selectedWireId);
+        return;
+      }
+      // Color shortcuts (0-9, c, l, m, p, y) — Wokwi style
+      const key = e.key.toLowerCase();
+      if (key in WIRE_KEY_COLORS) {
+        if (wireInProgress) {
+          setWireInProgressColor(WIRE_KEY_COLORS[key]);
+        } else if (selectedWireId) {
+          updateWire(selectedWireId, { color: WIRE_KEY_COLORS[key] });
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [wireInProgress, cancelWireCreation]);
+  }, [wireInProgress, cancelWireCreation, selectedWireId, removeWire, setWireInProgressColor, updateWire]);
 
   // Recalculate wire positions when components change (e.g., when loading an example)
   useEffect(() => {
@@ -670,7 +1049,7 @@ export const SimulatorCanvas = () => {
     return () => timers.forEach(t => clearTimeout(t));
   }, [components, recalculateAllWirePositions]);
 
-  // Auto-pan to keep the board visible after a project import/load.
+  // Auto-pan to keep the board and all components visible after a project import/load.
   // We track the previous component count and only re-center when the count
   // jumps (indicating the user loaded a new circuit, not just added one part).
   const prevComponentCountRef = useRef(-1);
@@ -689,9 +1068,21 @@ export const SimulatorCanvas = () => {
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
       const currentZoom = zoomRef.current;
+
+      // Compute the centroid of all world-space elements (board + extra components)
+      // so that the auto-pan keeps everything visible, not just the board.
+      const allX = [boardPositionRef.current.x, ...componentsRef.current.map((c) => c.x)];
+      const allY = [boardPositionRef.current.y, ...componentsRef.current.map((c) => c.y)];
+      const minX = Math.min(...allX);
+      const maxX = Math.max(...allX);
+      const minY = Math.min(...allY);
+      const maxY = Math.max(...allY);
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+
       const newPan = {
-        x: rect.width  / 4 - boardPosition.x * currentZoom,
-        y: rect.height / 4 - boardPosition.y * currentZoom,
+        x: rect.width  / 2 - centerX * currentZoom,
+        y: rect.height / 2 - centerY * currentZoom,
       };
       panRef.current = newPan;
       setPan(newPan);
@@ -723,10 +1114,7 @@ export const SimulatorCanvas = () => {
           y={component.y}
           isSelected={isSelected}
           onMouseDown={(e) => {
-            // Only handle UI events when simulation is NOT running
-            if (!running) {
-              handleComponentMouseDown(component.id, e);
-            }
+            handleComponentMouseDown(component.id, e);
           }}
           onDoubleClick={(e) => {
             // Only handle UI events when simulation is NOT running
@@ -752,6 +1140,27 @@ export const SimulatorCanvas = () => {
 
   return (
     <div className="simulator-canvas-container">
+      {/* ESP32 crash notification */}
+      {esp32CrashBoardId && (
+        <div style={{
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1000, background: '#c0392b', color: '#fff',
+          padding: '8px 16px', borderRadius: 6, display: 'flex', alignItems: 'center',
+          gap: 12, fontSize: 13, boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+        }}>
+          <span>ESP32 crash detected on board <strong>{esp32CrashBoardId}</strong> — cache error (IDF incompatibility)</span>
+          <button
+            onClick={dismissEsp32Crash}
+            style={{
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.6)',
+              color: '#fff', borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Main Canvas */}
       <div className="simulator-canvas">
         <div className="canvas-header">
@@ -759,16 +1168,16 @@ export const SimulatorCanvas = () => {
             {/* Status LED */}
             <span className={`status-dot ${running ? 'running' : 'stopped'}`} title={running ? 'Running' : 'Stopped'} />
 
-            {/* Board selector */}
+            {/* Active board selector (multi-board) */}
             <select
               className="board-selector"
-              value={boardType}
-              onChange={(e) => setBoardType(e.target.value as BoardType)}
+              value={activeBoardId ?? ''}
+              onChange={(e) => useSimulatorStore.getState().setActiveBoardId(e.target.value)}
               disabled={running}
-              title="Select board"
+              title="Active board"
             >
-              {(Object.entries(BOARD_LABELS) as [BoardType, string][]).map(([type, label]) => (
-                <option key={type} value={type}>{label}</option>
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>{BOARD_KIND_LABELS[b.boardKind] ?? b.id}</option>
               ))}
             </select>
 
@@ -834,6 +1243,7 @@ export const SimulatorCanvas = () => {
               </svg>
               Add
             </button>
+
           </div>
         </div>
         <div
@@ -843,84 +1253,107 @@ export const SimulatorCanvas = () => {
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={() => { isPanningRef.current = false; setPan({ ...panRef.current }); setDraggedComponentId(null); }}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={() => setSelectedComponentId(null)}
-          style={{ cursor: isPanningRef.current ? 'grabbing' : wireInProgress ? 'crosshair' : 'default' }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (wireInProgress) cancelWireCreation();
+          }}
+          onClick={(e) => {
+            if (wireInProgress) {
+              const world = toWorld(e.clientX, e.clientY);
+              addWireWaypoint(world.x, world.y);
+              return;
+            }
+            // If a segment handle drag just finished, don't also select
+            if (segmentDragJustCommittedRef.current) {
+              segmentDragJustCommittedRef.current = false;
+              return;
+            }
+            // Wire selection via canvas-level hit detection
+            const world = toWorld(e.clientX, e.clientY);
+            const threshold = 8 / zoomRef.current;
+            const wire = findWireNearPoint(wiresRef.current, world.x, world.y, threshold);
+            if (wire) {
+              setSelectedWire(selectedWireId === wire.id ? null : wire.id);
+            } else {
+              setSelectedWire(null);
+              setSelectedComponentId(null);
+            }
+          }}
+          onDoubleClick={(e) => {
+            if (wireInProgress) return;
+            const world = toWorld(e.clientX, e.clientY);
+            const threshold = 8 / zoomRef.current;
+            const wire = findWireNearPoint(wiresRef.current, world.x, world.y, threshold);
+            if (wire) {
+              removeWire(wire.id);
+            }
+          }}
+          style={{
+            cursor: isPanningRef.current ? 'grabbing'
+              : wireInProgress ? 'crosshair'
+              : hoveredWireId ? 'pointer'
+              : 'default',
+          }}
         >
+          {/* Sensor Control Panel — shown when a sensor component is clicked during simulation */}
+          {sensorControlComponentId && sensorControlMetadataId && (() => {
+            const meta = registry.getById(sensorControlMetadataId);
+            return (
+              <SensorControlPanel
+                componentId={sensorControlComponentId}
+                metadataId={sensorControlMetadataId}
+                sensorName={meta?.name ?? sensorControlMetadataId}
+                onClose={() => {
+                  setSensorControlComponentId(null);
+                  setSensorControlMetadataId(null);
+                }}
+              />
+            );
+          })()}
+
           {/* Infinite world — pan+zoom applied here */}
           <div
             className="canvas-world"
             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
           >
             {/* Wire Layer - Renders below all components */}
-            <WireLayer />
-
-            {/* Board visual — switches based on selected board type */}
-            {boardType === 'arduino-uno' ? (
-              <ArduinoUno
-                x={boardPosition.x}
-                y={boardPosition.y}
-                led13={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
-              />
-            ) : boardType === 'arduino-nano' ? (
-              <ArduinoNano
-                x={boardPosition.x}
-                y={boardPosition.y}
-                led13={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
-              />
-            ) : boardType === 'arduino-mega' ? (
-              <ArduinoMega
-                x={boardPosition.x}
-                y={boardPosition.y}
-                led13={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
-              />
-            ) : (
-              <NanoRP2040
-                x={boardPosition.x}
-                y={boardPosition.y}
-                ledBuiltIn={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
-              />
-            )}
-
-            {/* Board interaction overlay for dragging */}
-            {!running && (
-              <div
-                data-board-overlay="true"
-                style={{
-                  position: 'absolute',
-                  left: boardPosition.x,
-                  top: boardPosition.y,
-                  width: boardType === 'arduino-uno' ? 360 : boardType === 'arduino-nano' ? 175 : boardType === 'arduino-mega' ? 530 : 280,
-                  height: boardType === 'arduino-uno' ? 250 : boardType === 'arduino-nano' ? 70 : boardType === 'arduino-mega' ? 195 : 180,
-                  cursor: 'move',
-                  zIndex: 1,
-                }}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  const world = toWorld(e.clientX, e.clientY);
-                  setDraggedComponentId('__board__');
-                  setDragOffset({
-                    x: world.x - boardPosition.x,
-                    y: world.y - boardPosition.y,
-                  });
-                }}
-              />
-            )}
-
-            {/* Board pin overlay */}
-            <PinOverlay
-              componentId={boardType === 'arduino-uno' ? 'arduino-uno' : boardType === 'arduino-nano' ? 'arduino-nano' : boardType === 'arduino-mega' ? 'arduino-mega' : 'nano-rp2040'}
-              componentX={boardPosition.x}
-              componentY={boardPosition.y}
-              onPinClick={handlePinClick}
-              showPins={true}
-              wrapperOffsetX={0}
-              wrapperOffsetY={0}
+            <WireLayer
+              hoveredWireId={hoveredWireId}
+              segmentDragPreview={segmentDragPreview}
+              segmentHandles={segmentHandles}
+              onHandleMouseDown={handleHandleMouseDown}
             />
+
+            {/* All boards on canvas */}
+            {boards.map((board) => (
+              <BoardOnCanvas
+                key={board.id}
+                board={board}
+                running={running}
+                isActive={board.id === activeBoardId}
+                led13={Boolean(components.find((c) => c.id === 'led-builtin')?.properties.state)}
+                onMouseDown={(e) => {
+                  setClickStartTime(Date.now());
+                  setClickStartPos({ x: e.clientX, y: e.clientY });
+                  const world = toWorld(e.clientX, e.clientY);
+                  setDraggedComponentId(`__board__:${board.id}`);
+                  setDragOffset({ x: world.x - board.x, y: world.y - board.y });
+                }}
+                onPinClick={handlePinClick}
+              />
+            ))}
 
             {/* Components using wokwi-elements */}
             <div className="components-area">{registryLoaded && components.map(renderComponent)}</div>
           </div>
+
+          {/* Wire creation mode banner — visible on both desktop and mobile */}
+          {wireInProgress && (
+            <div className="wire-mode-banner">
+              <span>Tap a pin to connect — tap canvas for waypoints</span>
+              <button onClick={() => cancelWireCreation()}>Cancel</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -971,7 +1404,17 @@ export const SimulatorCanvas = () => {
         isOpen={showComponentPicker}
         onClose={() => setShowComponentPicker(false)}
         onSelectComponent={handleSelectComponent}
+        onSelectBoard={(kind: BoardKind) => {
+          const sameKind = boards.filter((b) => b.boardKind === kind);
+          const newBoardId = sameKind.length === 0 ? kind : `${kind}-${sameKind.length + 1}`;
+          const x = boardPosition.x + boards.length * 60 + 420;
+          const y = boardPosition.y + boards.length * 30;
+          addBoard(kind, x, y);
+          // file group is created inside addBoard
+          void newBoardId;
+        }}
       />
+
     </div>
   );
 };
