@@ -415,7 +415,7 @@ velxio/
 
 Join the Discord server to ask questions, share projects, and follow updates:
 
-**[discord.gg/rCScB9cG](https://discord.gg/rCScB9cG)**
+**[discord.gg/rCScB9cG](https://discord.gg/3QBwQyaWs)**
 
 ## Contributing
 
