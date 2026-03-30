@@ -22,6 +22,15 @@ export type LanguageMode = 'arduino' | 'micropython';
 export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'raspberry-pi-pico',
   'pi-pico-w',
+  // ESP32 Xtensa (QEMU bridge)
+  'esp32',
+  'esp32-devkit-c-v4',
+  'esp32-cam',
+  'wemos-lolin32-lite',
+  // ESP32-S3 Xtensa (QEMU bridge)
+  'esp32-s3',
+  'xiao-esp32-s3',
+  'arduino-nano-esp32',
 ]);
 
 export interface BoardInstance {

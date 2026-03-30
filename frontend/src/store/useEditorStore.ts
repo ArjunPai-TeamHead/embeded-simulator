@@ -32,6 +32,17 @@ while True:
     time.sleep(1)
 `;
 
+const DEFAULT_ESP32_MICROPYTHON_CONTENT = `# MicroPython Blink for ESP32
+from machine import Pin
+import time
+
+led = Pin(2, Pin.OUT)  # Built-in LED on GPIO 2
+
+while True:
+    led.toggle()
+    time.sleep(1)
+`;
+
 const DEFAULT_PY_CONTENT = `import RPi.GPIO as GPIO
 import time
 
@@ -297,7 +308,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const mainId = `${groupId}-main`;
         let fileName: string;
         let content: string;
-        if (isMicroPython) {
+        const isEsp32 = groupId.includes('esp32');
+        if (isMicroPython && isEsp32) {
+          fileName = 'main.py';
+          content = DEFAULT_ESP32_MICROPYTHON_CONTENT;
+        } else if (isMicroPython) {
           fileName = 'main.py';
           content = DEFAULT_MICROPYTHON_CONTENT;
         } else if (isPi) {

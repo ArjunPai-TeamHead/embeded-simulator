@@ -587,10 +587,27 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
       if (!board) return;
       if (!BOARD_SUPPORTS_MICROPYTHON.has(board.boardKind)) return;
 
-      const sim = getBoardSimulator(boardId);
-      if (!(sim instanceof RP2040Simulator)) return;
+      if (isEsp32Kind(board.boardKind)) {
+        // ESP32 path: load MicroPython firmware via QEMU bridge, inject code via raw-paste REPL
+        const { getEsp32Firmware, uint8ArrayToBase64 } = await import('../simulation/Esp32MicroPythonLoader');
+        const esp32Bridge = getEsp32Bridge(boardId);
+        if (!esp32Bridge) return;
 
-      await sim.loadMicroPython(files);
+        const firmware = await getEsp32Firmware(board.boardKind);
+        const b64 = uint8ArrayToBase64(firmware);
+        esp32Bridge.loadFirmware(b64);
+
+        // Queue code injection for after REPL boots
+        const mainFile = files.find(f => f.name === 'main.py') ?? files[0];
+        if (mainFile) {
+          esp32Bridge.setPendingMicroPythonCode(mainFile.content);
+        }
+      } else {
+        // RP2040 path: load firmware + filesystem in browser
+        const sim = getBoardSimulator(boardId);
+        if (!(sim instanceof RP2040Simulator)) return;
+        await sim.loadMicroPython(files);
+      }
 
       set((s) => {
         const boards = s.boards.map((b) =>

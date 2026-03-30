@@ -4,43 +4,69 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useSimulatorStore, getBoardSimulator } from '../../store/useSimulatorStore';
-import { RP2040Simulator } from '../../simulation/RP2040Simulator';
+import { useSimulatorStore } from '../../store/useSimulatorStore';
 import type { BoardKind } from '../../types/board';
 import { BOARD_KIND_LABELS } from '../../types/board';
 
 // Short labels for tabs
-const BOARD_SHORT_LABEL: Record<BoardKind, string> = {
+const BOARD_SHORT_LABEL: Partial<Record<BoardKind, string>> = {
   'arduino-uno':       'Uno',
   'arduino-nano':      'Nano',
   'arduino-mega':      'Mega',
   'raspberry-pi-pico': 'Pico',
+  'pi-pico-w':         'Pico W',
   'raspberry-pi-3':    'Pi 3B',
-  'esp32':    'ESP32',
-  'esp32-s3': 'ESP32-S3',
-  'esp32-c3': 'ESP32-C3',
+  'esp32':             'ESP32',
+  'esp32-devkit-c-v4': 'ESP32',
+  'esp32-cam':         'ESP32-CAM',
+  'wemos-lolin32-lite':'Lolin32',
+  'esp32-s3':          'ESP32-S3',
+  'xiao-esp32-s3':     'XIAO-S3',
+  'arduino-nano-esp32':'Nano ESP32',
+  'esp32-c3':          'ESP32-C3',
+  'xiao-esp32-c3':     'XIAO-C3',
+  'aitewinrobot-esp32c3-supermini': 'C3 Mini',
+  'attiny85':          'ATtiny85',
 };
 
-const BOARD_ICON: Record<BoardKind, string> = {
+const BOARD_ICON: Partial<Record<BoardKind, string>> = {
   'arduino-uno':       '⬤',
   'arduino-nano':      '▪',
   'arduino-mega':      '▬',
   'raspberry-pi-pico': '◆',
+  'pi-pico-w':         '◆',
   'raspberry-pi-3':    '⬛',
-  'esp32':    '⬡',
-  'esp32-s3': '⬡',
-  'esp32-c3': '⬡',
+  'esp32':             '⬡',
+  'esp32-devkit-c-v4': '⬡',
+  'esp32-cam':         '⬡',
+  'wemos-lolin32-lite':'⬡',
+  'esp32-s3':          '⬡',
+  'xiao-esp32-s3':     '⬡',
+  'arduino-nano-esp32':'⬡',
+  'esp32-c3':          '⬡',
+  'xiao-esp32-c3':     '⬡',
+  'aitewinrobot-esp32c3-supermini': '⬡',
+  'attiny85':          '▪',
 };
 
-const BOARD_COLOR: Record<BoardKind, string> = {
+const BOARD_COLOR: Partial<Record<BoardKind, string>> = {
   'arduino-uno':       '#4fc3f7',
   'arduino-nano':      '#4fc3f7',
   'arduino-mega':      '#4fc3f7',
   'raspberry-pi-pico': '#ce93d8',
+  'pi-pico-w':         '#ce93d8',
   'raspberry-pi-3':    '#ef9a9a',
-  'esp32':    '#a5d6a7',
-  'esp32-s3': '#a5d6a7',
-  'esp32-c3': '#a5d6a7',
+  'esp32':             '#a5d6a7',
+  'esp32-devkit-c-v4': '#a5d6a7',
+  'esp32-cam':         '#a5d6a7',
+  'wemos-lolin32-lite':'#a5d6a7',
+  'esp32-s3':          '#a5d6a7',
+  'xiao-esp32-s3':     '#a5d6a7',
+  'arduino-nano-esp32':'#a5d6a7',
+  'esp32-c3':          '#a5d6a7',
+  'xiao-esp32-c3':     '#a5d6a7',
+  'aitewinrobot-esp32c3-supermini': '#a5d6a7',
+  'attiny85':          '#ffcc80',
 };
 
 export const SerialMonitor: React.FC = () => {
@@ -103,17 +129,14 @@ export const SerialMonitor: React.FC = () => {
       handleSend();
       return;
     }
-    // MicroPython REPL control characters
-    if (resolvedTabId && e.ctrlKey) {
-      const sim = getBoardSimulator(resolvedTabId);
-      if (sim instanceof RP2040Simulator && sim.isMicroPythonMode()) {
-        if (e.key === 'c' || e.key === 'C') {
-          e.preventDefault();
-          sim.serialWriteByte(0x03); // Ctrl+C — keyboard interrupt
-        } else if (e.key === 'd' || e.key === 'D') {
-          e.preventDefault();
-          sim.serialWriteByte(0x04); // Ctrl+D — soft reset
-        }
+    // MicroPython REPL control characters (works for RP2040 and ESP32)
+    if (resolvedTabId && isMicroPython && e.ctrlKey) {
+      if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        serialWriteToBoard(resolvedTabId, '\x03'); // Ctrl+C — keyboard interrupt
+      } else if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        serialWriteToBoard(resolvedTabId, '\x04'); // Ctrl+D — soft reset
       }
     }
   }, [handleSend, resolvedTabId]);
@@ -143,7 +166,7 @@ export const SerialMonitor: React.FC = () => {
       <div style={styles.tabStrip}>
         {boards.map((board) => {
           const isActive = board.id === resolvedTabId;
-          const color = BOARD_COLOR[board.boardKind];
+          const color = BOARD_COLOR[board.boardKind] ?? '#999';
           const hasUnread = (board.serialOutput.length) > (lastSeenLen[board.id] ?? 0);
           return (
             <button
@@ -156,9 +179,9 @@ export const SerialMonitor: React.FC = () => {
               title={BOARD_KIND_LABELS[board.boardKind]}
             >
               <span style={{ fontSize: 9, marginRight: 3, color: isActive ? color : '#888' }}>
-                {BOARD_ICON[board.boardKind]}
+                {BOARD_ICON[board.boardKind] ?? '●'}
               </span>
-              {BOARD_SHORT_LABEL[board.boardKind]}
+              {BOARD_SHORT_LABEL[board.boardKind] ?? board.boardKind}
               {hasUnread && !isActive && <span style={styles.unreadDot} />}
             </button>
           );
