@@ -12,9 +12,9 @@ export type BoardKind =
   | 'esp32-s3'                    // Xtensa LX7, QEMU backend
   | 'xiao-esp32-s3'               // Seeed XIAO ESP32-S3, QEMU (esp32-s3)
   | 'arduino-nano-esp32'          // Arduino Nano ESP32 (S3), QEMU (esp32-s3)
-  | 'esp32-c3'                    // RISC-V RV32IMC, browser emulation (Esp32C3Simulator)
-  | 'xiao-esp32-c3'               // Seeed XIAO ESP32-C3, browser emulation (Esp32C3Simulator)
-  | 'aitewinrobot-esp32c3-supermini' // ESP32-C3 SuperMini, browser emulation (Esp32C3Simulator)
+  | 'esp32-c3'                    // RISC-V RV32IMC, QEMU backend
+  | 'xiao-esp32-c3'               // Seeed XIAO ESP32-C3, QEMU backend
+  | 'aitewinrobot-esp32c3-supermini' // ESP32-C3 SuperMini, QEMU backend
   | 'attiny85';                   // AVR ATtiny85, browser emulation (avr8js)
 
 export type LanguageMode = 'arduino' | 'micropython';
@@ -31,6 +31,10 @@ export const BOARD_SUPPORTS_MICROPYTHON = new Set<BoardKind>([
   'esp32-s3',
   'xiao-esp32-s3',
   'arduino-nano-esp32',
+  // ESP32-C3 RISC-V (QEMU bridge)
+  'esp32-c3',
+  'xiao-esp32-c3',
+  'aitewinrobot-esp32c3-supermini',
 ]);
 
 export interface BoardInstance {

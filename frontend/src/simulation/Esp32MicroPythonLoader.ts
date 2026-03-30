@@ -26,12 +26,20 @@ const FIRMWARE_MAP: Record<string, FirmwareConfig> = {
     cacheKey: 'micropython-esp32s3-v1.20.0',
     fallback: '/firmware/micropython-esp32s3.bin',
   },
+  'esp32-c3': {
+    remote: 'https://micropython.org/resources/firmware/ESP32_GENERIC_C3-20230426-v1.20.0.bin',
+    cacheKey: 'micropython-esp32c3-v1.20.0',
+    fallback: '/firmware/micropython-esp32c3.bin',
+  },
 };
 
 /** Map any ESP32-family board kind to firmware variant key */
-function toFirmwareVariant(boardKind: BoardKind): 'esp32' | 'esp32-s3' {
+function toFirmwareVariant(boardKind: BoardKind): 'esp32' | 'esp32-s3' | 'esp32-c3' {
   if (boardKind === 'esp32-s3' || boardKind === 'xiao-esp32-s3' || boardKind === 'arduino-nano-esp32') {
     return 'esp32-s3';
+  }
+  if (boardKind === 'esp32-c3' || boardKind === 'xiao-esp32-c3' || boardKind === 'aitewinrobot-esp32c3-supermini') {
+    return 'esp32-c3';
   }
   return 'esp32';
 }
