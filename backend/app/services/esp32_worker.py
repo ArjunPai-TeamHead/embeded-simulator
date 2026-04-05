@@ -216,8 +216,9 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         b'-drive', f'file={firmware_path},if=mtd,format=raw'.encode(),
     ]
 
-    # ── ESP32-C3 requires deterministic instruction counting for stable boot
-    if 'c3' in machine:
+    # Deterministic instruction counting for stable timers (WiFi beacons, boot)
+    # Required for ESP32-C3 boot; also needed for ESP32 WiFi on virtualized hosts
+    if 'c3' in machine or wifi_enabled:
         args_list.extend([b'-icount', b'3'])
 
     # ── WiFi NIC (slirp user-mode networking) ──────────────────────────────
