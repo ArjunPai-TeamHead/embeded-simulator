@@ -368,9 +368,26 @@ class ESPIDFCompiler:
                 for tc_dir in Path(tools_path).glob('tools/riscv32-esp-elf/*/riscv32-esp-elf/bin'):
                     env['PATH'] = str(tc_dir) + os.pathsep + env['PATH']
         else:
-            # Linux/Docker: source export.sh environment
+            # Linux/Docker: explicitly add toolchain bin dirs to PATH so cmake
+            # can find the cross-compilers even when the process wasn't started
+            # with export.sh (e.g. after a uvicorn restart or in tests).
             tools_path = os.environ.get('IDF_TOOLS_PATH', os.path.expanduser('~/.espressif'))
             env['IDF_TOOLS_PATH'] = tools_path
+            if os.path.isdir(tools_path):
+                extra_paths: list[str] = []
+                # Xtensa toolchain (ESP32, ESP32-S3)
+                for tc_dir in Path(tools_path).glob('tools/xtensa-esp32-elf/*/xtensa-esp32-elf/bin'):
+                    extra_paths.append(str(tc_dir))
+                for tc_dir in Path(tools_path).glob('tools/xtensa-esp-elf/*/xtensa-esp-elf/bin'):
+                    extra_paths.append(str(tc_dir))
+                # RISC-V toolchain (ESP32-C3)
+                for tc_dir in Path(tools_path).glob('tools/riscv32-esp-elf/*/riscv32-esp-elf/bin'):
+                    extra_paths.append(str(tc_dir))
+                # ESP-IDF host tools (esptool, partition_table, etc.)
+                for tool_dir in Path(tools_path).glob('tools/*/*/bin'):
+                    extra_paths.append(str(tool_dir))
+                if extra_paths:
+                    env['PATH'] = os.pathsep.join(extra_paths) + os.pathsep + env.get('PATH', '')
 
         return env
 
@@ -584,7 +601,8 @@ class ESPIDFCompiler:
             all_stderr = '\n'.join(filtered_stderr_lines)
 
             if ninja_result.returncode != 0:
-                logger.error(f'[espidf] ninja build failed:\n{ninja_result.stderr}')
+                logger.error(f'[espidf] ninja build failed (stdout):\n{ninja_result.stdout[-4000:]}')
+                logger.error(f'[espidf] ninja build failed (stderr):\n{ninja_result.stderr[-2000:]}')
                 return {
                     'success': False,
                     'error': 'ESP-IDF build failed',
