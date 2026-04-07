@@ -1,24 +1,33 @@
 # ---- Stage 0: QEMU .so + ROM binaries ----
-# Two modes:
-#   1. Local: place files in prebuilt/qemu/ (from build-qemu.sh or manual copy)
-#   2. CI/CD: downloads from GitHub Release (requires qemu-lcgamboa repo to be public)
-# The COPY always runs; the RUN only downloads missing files.
+# Downloads arch-specific .so from GitHub Release (e.g. libqemu-xtensa-amd64.so)
+# and renames to libqemu-xtensa.so so the backend needs no changes.
+# Local prebuilt files (prebuilt/qemu/) are used if present.
 FROM ubuntu:22.04 AS qemu-provider
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+ARG TARGETARCH
 ARG QEMU_RELEASE_URL=https://github.com/davidmonterocrespo24/velxio/releases/download/qemu-prebuilt
 
 # Copy the prebuilt directory (may contain .so+ROM files or just the .gitkeep)
 RUN mkdir -p /qemu
 COPY prebuilt/qemu/ /qemu/
 
-# Download any missing files from GitHub Release
+# Download arch-specific .so and arch-independent ROM files
 RUN cd /qemu \
- && for f in libqemu-xtensa.so libqemu-riscv32.so esp32-v3-rom.bin esp32-v3-rom-app.bin esp32c3-rom.bin; do \
+ && for base in libqemu-xtensa libqemu-riscv32; do \
+      f="${base}.so" ; \
       if [ ! -f "$f" ]; then \
-        echo "Downloading $f from release..." ; \
+        echo "Downloading ${base}-${TARGETARCH}.so → $f ..." ; \
+        curl -fSL -o "$f" "${QEMU_RELEASE_URL}/${base}-${TARGETARCH}.so" ; \
+      else \
+        echo "Using local $f ($(stat -c%s "$f") bytes)" ; \
+      fi ; \
+    done \
+ && for f in esp32-v3-rom.bin esp32-v3-rom-app.bin esp32c3-rom.bin; do \
+      if [ ! -f "$f" ]; then \
+        echo "Downloading $f ..." ; \
         curl -fSL -o "$f" "${QEMU_RELEASE_URL}/$f" ; \
       else \
         echo "Using local $f ($(stat -c%s "$f") bytes)" ; \
