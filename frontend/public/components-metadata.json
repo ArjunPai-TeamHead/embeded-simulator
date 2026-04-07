@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "generatedAt": "2026-04-07T14:03:23.074Z",
+  "generatedAt": "2026-04-07T16:08:47.256Z",
   "components": [
     {
       "id": "arduino-mega",
@@ -254,7 +254,10 @@
           "defaultValue": "i2c",
           "control": "select",
           "description": "Communication protocol",
-          "options": ["i2c", "spi"]
+          "options": [
+            "i2c",
+            "spi"
+          ]
         }
       ],
       "defaultValues": {
@@ -1337,7 +1340,15 @@
           "type": "string",
           "defaultValue": "red",
           "control": "select",
-          "options": ["red", "green", "blue", "yellow", "orange", "white", "purple"]
+          "options": [
+            "red",
+            "green",
+            "blue",
+            "yellow",
+            "orange",
+            "white",
+            "purple"
+          ]
         },
         {
           "name": "lightColor",
