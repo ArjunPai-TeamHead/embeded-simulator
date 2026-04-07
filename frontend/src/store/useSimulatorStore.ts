@@ -110,6 +110,23 @@ class Esp32BridgeShim {
   unregisterSensor(pin: number): void {
     this.bridge.sendSensorDetach(pin);
   }
+
+  // ── I2C write-only device relay (SSD1306, PCF8574) ───────────────────────
+  private _i2cTransactionListeners = new Map<number, (data: number[]) => void>();
+
+  addI2CTransactionListener(addr: number, fn: (data: number[]) => void): void {
+    this._i2cTransactionListeners.set(addr, fn);
+    this.bridge.onI2cTransaction = (a: number, data: number[]) => {
+      this._i2cTransactionListeners.get(a)?.(data);
+    };
+  }
+
+  removeI2CTransactionListener(addr: number): void {
+    this._i2cTransactionListeners.delete(addr);
+    if (this._i2cTransactionListeners.size === 0) {
+      this.bridge.onI2cTransaction = null;
+    }
+  }
 }
 
 // ── Shared LEDC update handler (used by addBoard, setBoardType, initSimulator) ─

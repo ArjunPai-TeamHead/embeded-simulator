@@ -24,8 +24,9 @@
  *     { type: 'gpio_dir',      data: { pin: number, dir: 0 | 1 } }
  *     { type: 'ledc_update',   data: { channel: number, duty: number, duty_pct: number } }
  *     { type: 'ws2812_update', data: { channel: number, pixels: [number, number, number][] } }
- *     { type: 'i2c_event',     data: { addr: number, data: number } }
- *     { type: 'spi_event',     data: { data: number } }
+ *     { type: 'i2c_event',        data: { addr: number, data: number } }
+ *     { type: 'i2c_transaction',  data: { addr: number, data: number[] } }
+ *     { type: 'spi_event',        data: { data: number } }
  *     { type: 'system',        data: { event: string, ... } }
  *     { type: 'error',         data: { message: string } }
  */
@@ -76,8 +77,9 @@ export class Esp32Bridge {
   onPinDir:        ((gpioPin: number, dir: 0 | 1) => void) | null = null;
   onLedcUpdate:    ((update: LedcUpdate) => void) | null = null;
   onWs2812Update:  ((channel: number, pixels: Ws2812Pixel[]) => void) | null = null;
-  onI2cEvent:      ((addr: number, data: number) => void) | null = null;
-  onSpiEvent:      ((data: number) => void) | null = null;
+  onI2cEvent:        ((addr: number, data: number) => void) | null = null;
+  onI2cTransaction:  ((addr: number, data: number[]) => void) | null = null;
+  onSpiEvent:        ((data: number) => void) | null = null;
   onConnected:     (() => void) | null = null;
   onDisconnected:  (() => void) | null = null;
   onError:         ((msg: string) => void) | null = null;
@@ -177,6 +179,12 @@ export class Esp32Bridge {
           const addr = msg.data.addr as number;
           const data = msg.data.data as number;
           this.onI2cEvent?.(addr, data);
+          break;
+        }
+        case 'i2c_transaction': {
+          const addr = msg.data.addr as number;
+          const data = msg.data.data as number[];
+          this.onI2cTransaction?.(addr, data);
           break;
         }
         case 'spi_event': {
