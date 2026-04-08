@@ -4,11 +4,14 @@ esp32_i2c_slaves.py — Standalone I2C slave state machines for ESP32 QEMU simul
 Each class emulates the I2C register map of a real sensor, handling the picsimlab
 I2C event protocol:
 
-  event & 0xFF00:
-    0x0100 = START  — return 1 (ACK = device present)
-    0x0200 = WRITE  — (byte in bits 7:0) return 1 (ACK)
-    0x0300 = READ   — return register byte at current pointer
-    0x0000 = STOP
+  event & 0x00FF  (LOW byte) = operation type:
+    0x01 = START  — return 1 (ACK = device present)
+    0x05 = WRITE  — (byte in bits 15:8) return 1 (ACK)
+    0x06 = WRITE  — (byte in bits 15:8) return 1 (ACK) — continuation byte
+    0x03 = READ   — return register byte at current pointer
+    0x00 = STOP
+
+  Data byte for WRITE: (event >> 8) & 0xFF  (HIGH byte)
 
 These classes are imported by esp32_worker.py and by test_esp32_i2c_slaves.py.
 """
@@ -16,20 +19,31 @@ These classes are imported by esp32_worker.py and by test_esp32_i2c_slaves.py.
 import datetime as _datetime
 
 
+# ── Protocol constants (actual picsimlab encoding) ────────────────────────────
+
+I2C_STOP  = 0x00   # event & 0xFF
+I2C_START = 0x01   # event & 0xFF
+I2C_READ  = 0x03   # event & 0xFF
+# WRITE uses two codes:
+#   0x05 = first byte in a write burst (register address)
+#   0x06 = subsequent byte in a write burst (data)
+# Both are handled identically by slaves — first_byte flag distinguishes address vs data.
+_I2C_WRITE_CODES = (0x05, 0x06)
+
+
 # ── MPU-6050 IMU ──────────────────────────────────────────────────────────────
 
 class MPU6050Slave:
     """Full MPU-6050 register-map I2C slave emulation (address 0x68 or 0x69)."""
 
-    I2C_START = 0x0100
-    I2C_WRITE = 0x0200
-    I2C_READ  = 0x0300
-
     def __init__(self, addr: int = 0x68):
         self.addr = addr
         self.regs = bytearray(256)
-        self.reg_ptr   = 0
+        # Default reg_ptr to WHO_AM_I so the first READ (without a preceding
+        # WRITE, as happens with Adafruit BusIO write-then-read) returns 0x68.
+        self.reg_ptr    = 0x75
         self.first_byte = True
+        self._first_read_done = False  # True after begin() WHO_AM_I is read
 
         # WHO_AM_I
         self.regs[0x75] = 0x68
@@ -49,22 +63,35 @@ class MPU6050Slave:
         # GYRO all zero (stationary)
 
     def handle_event(self, event: int) -> int:
-        phase = event & 0xFF00
-        if phase == self.I2C_START:
+        op   = event & 0xFF          # low byte = operation type
+        data = (event >> 8) & 0xFF   # high byte = data byte (for WRITE)
+
+        if op == I2C_START:
             self.first_byte = True
+            if self._first_read_done:
+                # picsimlab does not fire WRITE callbacks for write-then-read
+                # transactions (endTransmission(false) + requestFrom).  After
+                # begin() has succeeded, reset reg_ptr to the accel/gyro/temp
+                # block so data reads return the right bytes even without a
+                # prior WRITE setting the register address.
+                self.reg_ptr = 0x3B
             return 1              # ACK — device present
-        elif phase == self.I2C_WRITE:
-            data = event & 0xFF
+        elif op in _I2C_WRITE_CODES:
             if self.first_byte:
                 self.reg_ptr    = data
                 self.first_byte = False
             else:
                 self.regs[self.reg_ptr] = data
+                # Auto-clear DEVICE_RESET bit (reg 0x6B bit 7) so the
+                # Adafruit begin() reset-wait loop exits immediately.
+                if self.reg_ptr == 0x6B:
+                    self.regs[0x6B] &= 0x7F
                 self.reg_ptr = (self.reg_ptr + 1) & 0xFF
             return 1              # ACK
-        elif phase == self.I2C_READ:
+        elif op == I2C_READ:
             val = self.regs[self.reg_ptr]
             self.reg_ptr = (self.reg_ptr + 1) & 0xFF
+            self._first_read_done = True
             return val
         else:                     # STOP / unknown
             self.first_byte = True
@@ -190,18 +217,19 @@ class BMP280Slave:
         self._update_measurements()
 
     def handle_event(self, event: int) -> int:
-        phase = event & 0xFF00
-        if phase == 0x0100:
+        op   = event & 0xFF
+        data = (event >> 8) & 0xFF
+
+        if op == I2C_START:
             self.first_byte = True; return 1
-        elif phase == 0x0200:
-            data = event & 0xFF
+        elif op in _I2C_WRITE_CODES:
             if self.first_byte:
                 self.reg_ptr = data; self.first_byte = False
             else:
                 self.regs[self.reg_ptr] = data
                 self.reg_ptr = (self.reg_ptr + 1) & 0xFF
             return 1
-        elif phase == 0x0300:
+        elif op == I2C_READ:
             val = self.regs[self.reg_ptr]
             self.reg_ptr = (self.reg_ptr + 1) & 0xFF
             return val
@@ -234,15 +262,16 @@ class DS1307Slave:
         return 0x00
 
     def handle_event(self, event: int) -> int:
-        phase = event & 0xFF00
-        if phase == 0x0100:
+        op   = event & 0xFF
+        data = (event >> 8) & 0xFF
+
+        if op == I2C_START:
             self.first_byte = True; return 1
-        elif phase == 0x0200:
-            data = event & 0xFF
+        elif op in _I2C_WRITE_CODES:
             if self.first_byte:
                 self.reg_ptr = data; self.first_byte = False
             return 1
-        elif phase == 0x0300:
+        elif op == I2C_READ:
             val = self._read_reg(self.reg_ptr)
             self.reg_ptr = (self.reg_ptr + 1) & 0x3F
             return val
@@ -279,14 +308,16 @@ class I2CWriteSink:
         self._buf: list[int] = []
 
     def handle_event(self, event: int) -> int:
-        phase = event & 0xFF00
-        if phase == 0x0100:    # START — reset buffer
+        op   = event & 0xFF
+        data = (event >> 8) & 0xFF
+
+        if op == I2C_START:          # START — reset buffer
             self._buf = []; return 1
-        elif phase == 0x0200:  # WRITE — accumulate byte
-            self._buf.append(event & 0xFF); return 1
-        elif phase == 0x0300:  # READ — write-only device
+        elif op in _I2C_WRITE_CODES: # WRITE — accumulate byte
+            self._buf.append(data); return 1
+        elif op == I2C_READ:         # READ — write-only device
             return 0xFF
-        else:                  # STOP — emit transaction
+        else:                        # STOP — emit transaction
             if self._buf:
                 self._emit({'type': 'i2c_transaction',
                             'addr': self.addr, 'data': list(self._buf)})

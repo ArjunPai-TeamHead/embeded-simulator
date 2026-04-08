@@ -1082,7 +1082,7 @@ PartSimulationRegistry.register('bmp280', {
  * Ambient temperature defaults to 25°C; override via `element.temperature`.
  */
 PartSimulationRegistry.register('ds3231', {
-  attachEvents: (element, simulator, _getPin) => {
+  attachEvents: (element, simulator, _getPin, componentId) => {
     const sim = simulator as any;
     const el  = element as any;
 
@@ -1098,7 +1098,13 @@ PartSimulationRegistry.register('ds3231', {
       const virtualPin = 200 + 0x68;
       const initTemp   = el.temperature !== undefined ? parseFloat(el.temperature) : 25.0;
       sim.registerSensor('ds3231', virtualPin, { addr: 0x68, temperature: initTemp });
-      return () => sim.unregisterSensor(virtualPin);
+      registerSensorUpdate(componentId, (values) => {
+        sim.updateSensor(virtualPin, values);
+      });
+      return () => {
+        sim.unregisterSensor(virtualPin);
+        unregisterSensorUpdate(componentId);
+      };
     }
 
     return () => {};

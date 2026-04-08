@@ -585,8 +585,13 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
         """Synchronous — must return immediately; called from QEMU thread."""
         # Register-map slaves (MPU-6050, etc.) take priority over static responses
         slave = _i2c_slaves.get(addr)
+        op     = event & 0xFF
+        data   = (event >> 8) & 0xFF
         if slave is not None:
-            return slave.handle_event(event)
+            result = slave.handle_event(event)
+            _log(f'I2C bus={bus_id} addr=0x{addr:02x} event=0x{event:04x} op=0x{op:02x} data=0x{data:02x} result=0x{result:02x} slave={type(slave).__name__} reg_ptr=0x{getattr(slave,"reg_ptr",0):02x}')
+            return result
+        _log(f'I2C bus={bus_id} addr=0x{addr:02x} event=0x{event:04x} op=0x{op:02x} NO_SLAVE registered={list(_i2c_slaves.keys())}')
         resp = _i2c_responses.get(addr, 0)
         if not _stopped.is_set():
             _emit({'type': 'i2c_event', 'bus': bus_id, 'addr': addr,
@@ -705,8 +710,9 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                 sensor_data['i2c_addr'] = i2c_addr
                 sensor_data['slave'] = sink
             _sensors[gpio] = sensor_data
-        _log(f'Pre-registered sensor {sensor_type} on GPIO {gpio}')
     _sensors_ready.set()
+    _log(f'esp32_i2c_slaves: MPU6050Slave default reg_ptr=0x{_MPU6050Slave().reg_ptr:02x} (expect 0x75)')
+    _log(f'_i2c_slaves registered: {list(_i2c_slaves.keys())}')
 
     _emit({'type': 'system', 'event': 'booted'})
     _log(f'QEMU started: machine={machine} firmware={firmware_path}')
@@ -802,7 +808,7 @@ def main() -> None:  # noqa: C901  (complexity OK for inline worker)
                     sensor_data['i2c_addr'] = i2c_addr
                     sensor_data['slave'] = slave
                 elif sensor_type in ('ds1307', 'ds3231'):
-                    i2c_addr = 0x68
+                    i2c_addr = int(cmd.get('addr', 0x68))
                     slave = _DS3231Slave() if sensor_type == 'ds3231' else _DS1307Slave()
                     _i2c_slaves[i2c_addr] = slave
                     sensor_data['i2c_addr'] = i2c_addr

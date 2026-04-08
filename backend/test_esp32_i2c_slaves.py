@@ -5,11 +5,14 @@ Covers BMP280Slave, DS1307Slave, DS3231Slave, and I2CWriteSink from
 app/services/esp32_i2c_slaves.py — the Python register-map emulators
 that handle I2C traffic from QEMU-simulated ESP32 firmware.
 
-I2C event encoding (picsimlab convention):
-  0x0100       = START  → slave must return 1 (ACK = device present)
-  0x0200 | b   = WRITE byte b → slave returns 1 (ACK)
-  0x0300       = READ  → slave returns register byte at current pointer
-  0x0000       = STOP  → slave resets state
+Actual picsimlab I2C event encoding (confirmed by observing real QEMU events):
+  event & 0xFF   = operation type:
+    0x01 = START  → slave must return 1 (ACK = device present)
+    0x05 = WRITE  (first byte / register address)  → slave returns 1 (ACK)
+    0x06 = WRITE  (subsequent bytes / data)         → slave returns 1 (ACK)
+    0x03 = READ   → slave returns register byte at current pointer
+    0x00 = STOP   → slave resets state
+  (event >> 8) & 0xFF = data byte (for WRITE events)
 
 Run from the backend/ directory:
     python test_esp32_i2c_slaves.py
@@ -27,18 +30,20 @@ from app.services.esp32_i2c_slaves import (
     DS1307Slave,
     DS3231Slave,
     I2CWriteSink,
+    MPU6050Slave,
 )
 
 
-# ── I2C protocol helpers ───────────────────────────────────────────────────────
+# ── I2C protocol helpers (correct picsimlab encoding) ─────────────────────────
 
-I2C_START = 0x0100
+I2C_START = 0x0001
 I2C_STOP  = 0x0000
-I2C_READ  = 0x0300
+I2C_READ  = 0x0003
 
 
 def i2c_write(byte: int) -> int:
-    return 0x0200 | (byte & 0xFF)
+    """WRITE event: data in high byte, type 0x05 in low byte."""
+    return ((byte & 0xFF) << 8) | 0x05
 
 
 def i2c_read_seq(slave, reg: int, n: int) -> list[int]:
@@ -364,6 +369,76 @@ class TestI2CWriteSink(unittest.TestCase):
         self.sink.handle_event(I2C_START)
         result = self.sink.handle_event(I2C_STOP)
         self.assertEqual(result, 0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MPU6050 Slave Tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestMPU6050Slave(unittest.TestCase):
+
+    def setUp(self):
+        self.mpu = MPU6050Slave()
+
+    def test_who_am_i_default_addr(self):
+        """WHO_AM_I register (0x75) must return 0x68."""
+        result = i2c_read_seq(self.mpu, 0x75, 1)
+        self.assertEqual(result[0], 0x68)
+
+    def test_start_ack(self):
+        """START event must return 1 (ACK — device present)."""
+        self.assertEqual(self.mpu.handle_event(I2C_START), 1)
+
+    def test_begin_no_write_events(self):
+        """Simulates Adafruit BusIO write-then-read: START then READ, no WRITE.
+        picsimlab does not fire WRITE callbacks for write-then-read transactions,
+        so the slave must return WHO_AM_I (0x68) on the first READ regardless."""
+        m = MPU6050Slave()
+        self.assertEqual(m.handle_event(I2C_START), 1)  # START → ACK
+        result = m.handle_event(I2C_READ)               # READ without prior WRITE
+        self.assertEqual(result, 0x68,
+            f"Expected WHO_AM_I=0x68 without WRITE, got 0x{result:02x}")
+
+    def test_data_read_after_begin(self):
+        """After begin() succeeds, START should reset reg_ptr to 0x3B (accel block)."""
+        m = MPU6050Slave()
+        # Simulate begin(): START + READ (no WRITE) → gets WHO_AM_I
+        m.handle_event(I2C_START)
+        m.handle_event(I2C_READ)  # _first_read_done = True
+        # Next transaction: START should reset reg_ptr to 0x3B
+        m.handle_event(I2C_START)
+        first_accel_byte = m.handle_event(I2C_READ)
+        self.assertEqual(first_accel_byte, m.regs[0x3B],
+            "After begin(), START should reset reg_ptr to 0x3B (accel block)")
+
+    def test_accel_z_default_1g(self):
+        """ACCEL_Z should default to +1g = 0x4000 (MSB=0x40, LSB=0x00)."""
+        result = i2c_read_seq(self.mpu, 0x3F, 2)
+        accel_z = (result[0] << 8) | result[1]
+        self.assertEqual(accel_z, 0x4000, f"Expected ACCEL_Z=0x4000, got 0x{accel_z:04x}")
+
+    def test_update_accel(self):
+        """update() must reflect new accel values in register reads."""
+        self.mpu.update(accel_x=1.0, accel_y=0.0, accel_z=0.0)
+        result = i2c_read_seq(self.mpu, 0x3B, 2)
+        accel_x = (result[0] << 8) | result[1]
+        # 1g at ±2g full-scale = 16384 = 0x4000
+        self.assertEqual(accel_x, 0x4000)
+
+    def test_device_reset_bit_auto_cleared(self):
+        """Writing 0x80 to PWR_MGMT_1 (0x6B) must auto-clear bit 7 immediately."""
+        self.mpu.handle_event(I2C_START)
+        self.mpu.handle_event(i2c_write(0x6B))  # register address
+        self.mpu.handle_event(0x8006)            # write 0x80 (DEVICE_RESET)
+        # Read back: bit 7 should be 0 (reset complete)
+        result = i2c_read_seq(self.mpu, 0x6B, 1)
+        self.assertEqual(result[0] & 0x80, 0, "DEVICE_RESET bit must auto-clear")
+
+    def test_alternate_address(self):
+        """MPU6050 at address 0x69 (AD0=HIGH) must still return WHO_AM_I=0x68."""
+        mpu69 = MPU6050Slave(addr=0x69)
+        result = i2c_read_seq(mpu69, 0x75, 1)
+        self.assertEqual(result[0], 0x68)
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────

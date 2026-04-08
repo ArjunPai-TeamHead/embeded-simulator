@@ -38,9 +38,11 @@ const I2C_SENSOR_MAP: Record<string, {
   sensorType: string;
   defaultAddr: number;
   addrProp?: string;       // property key that holds the I2C address (e.g. 'address')
+  addrIsBool?: boolean;    // true when addrProp is a boolean flag (e.g. AD0 → 0x68/0x69)
+  addrBoolHigh?: number;   // address when the boolean flag is truthy
   propertyKeys?: string[]; // additional sensor values to forward (e.g. temperature, pressure)
 }> = {
-  'mpu6050': { sensorType: 'mpu6050', defaultAddr: 0x68 },
+  'mpu6050': { sensorType: 'mpu6050', defaultAddr: 0x68, addrProp: 'ad0', addrIsBool: true, addrBoolHigh: 0x69 },
   'bmp280':  { sensorType: 'bmp280',  defaultAddr: 0x76, addrProp: 'address', propertyKeys: ['temperature', 'pressure'] },
   'ds1307':  { sensorType: 'ds1307',  defaultAddr: 0x68 },
   'ds3231':  { sensorType: 'ds3231',  defaultAddr: 0x68, propertyKeys: ['temperature'] },
@@ -702,10 +704,17 @@ export const useSimulatorStore = create<SimulatorState>((set, get) => {
             if (i2cDef.addrProp) {
               const rawAddr = comp.properties[i2cDef.addrProp];
               if (rawAddr !== undefined) {
-                const parsed = typeof rawAddr === 'string'
-                  ? (rawAddr.startsWith('0x') ? parseInt(rawAddr, 16) : parseInt(rawAddr, 10))
-                  : Number(rawAddr);
-                if (!isNaN(parsed)) addr = parsed;
+                if (i2cDef.addrIsBool) {
+                  // Boolean flag (e.g. AD0 on MPU-6050): truthy → high address
+                  if (rawAddr === true || rawAddr === 'true' || rawAddr === '1') {
+                    addr = i2cDef.addrBoolHigh ?? i2cDef.defaultAddr;
+                  }
+                } else {
+                  const parsed = typeof rawAddr === 'string'
+                    ? (rawAddr.startsWith('0x') ? parseInt(rawAddr, 16) : parseInt(rawAddr, 10))
+                    : Number(rawAddr);
+                  if (!isNaN(parsed)) addr = parsed;
+                }
               }
             }
             const virtualPin = 200 + addr;
