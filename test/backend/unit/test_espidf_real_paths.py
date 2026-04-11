@@ -13,6 +13,7 @@ or:
 """
 
 import importlib
+import os
 import sys
 import tempfile
 import shutil
@@ -69,9 +70,14 @@ def make_compiler_with_real_paths() -> ESPIDFCompiler:
     return comp
 
 
+@unittest.skipIf(
+    os.environ.get('CI') == 'true',
+    'Requires local Arduino libraries installed on Windows — skipped in CI',
+)
 class TestRealPathsSSD1306(unittest.TestCase):
     """
     Uses actual library directories on this machine to reproduce the build failure.
+    Only runs locally (not in CI) because it needs real Arduino library paths.
     """
 
     def setUp(self):
