@@ -1,0 +1,128 @@
+name: Backend E2E Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      QEMU_RELEASE_URL: https://github.com/davidmonterocrespo24/velxio/releases/download/qemu-prebuilt
+      QEMU_DIR: /opt/velxio-qemu
+      BACKEND_URL: http://localhost:8001
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── QEMU binaries + ROM files ──────────────────────────────────────────────
+      - name: Download QEMU binaries and ROM files
+        run: |
+          mkdir -p $QEMU_DIR
+          cd $QEMU_DIR
+
+          echo "Downloading QEMU shared libraries..."
+          curl -fSL -o libqemu-xtensa.so  "$QEMU_RELEASE_URL/libqemu-xtensa-amd64.so"
+          curl -fSL -o libqemu-riscv32.so "$QEMU_RELEASE_URL/libqemu-riscv32-amd64.so"
+
+          echo "Downloading ROM files..."
+          curl -fSL -o esp32-v3-rom.bin     "$QEMU_RELEASE_URL/esp32-v3-rom.bin"
+          curl -fSL -o esp32-v3-rom-app.bin "$QEMU_RELEASE_URL/esp32-v3-rom-app.bin"
+          curl -fSL -o esp32c3-rom.bin      "$QEMU_RELEASE_URL/esp32c3-rom.bin"
+
+          chmod +x libqemu-xtensa.so libqemu-riscv32.so
+          ls -lh .
+
+      # ── arduino-cli + ESP32 core ───────────────────────────────────────────────
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR=/usr/local/bin sh
+
+      - name: Cache arduino-cli cores and libraries
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-cores-esp32-${{ runner.os }}-v1
+
+      - name: Install ESP32 arduino core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      # ── Python + backend dependencies ─────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      # ── Node.js ───────────────────────────────────────────────────────────────
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── Start backend ─────────────────────────────────────────────────────────
+      - name: Start backend server
+        run: |
+          cd backend
+          QEMU_ESP32_LIB=$QEMU_DIR/libqemu-xtensa.so \
+          QEMU_RISCV32_LIB=$QEMU_DIR/libqemu-riscv32.so \
+          uvicorn app.main:app --port 8001 &
+          echo "Backend PID: $!"
+        env:
+          QEMU_ESP32_LIB: /opt/velxio-qemu/libqemu-xtensa.so
+          QEMU_RISCV32_LIB: /opt/velxio-qemu/libqemu-riscv32.so
+
+      - name: Wait for backend to be ready
+        run: |
+          echo "Waiting for backend on port 8001..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8001/docs > /dev/null 2>&1; then
+              echo "Backend is up after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8001/docs > /dev/null || (echo "Backend failed to start" && exit 1)
+
+      # ── Run e2e tests ─────────────────────────────────────────────────────────
+      #
+      # These tests compile real firmware via the backend and run full simulations
+      # over WebSocket. Each test has a generous timeout because compilation +
+      # firmware boot takes 30-60 s.
+      #
+      # NOT run here (require Windows DLLs, not .so):
+      #   test/backend/integration/  — uses libqemu-xtensa.dll (Windows only)
+      #
+      - name: Run DHT22 e2e test
+        run: node test/backend/e2e/test_dht22_simulation.mjs --timeout=60
+        env:
+          BACKEND_URL: http://localhost:8001
+
+      - name: Run HC-SR04 e2e test
+        run: node test/backend/e2e/test_hcsr04_simulation.mjs --timeout=75
+        env:
+          BACKEND_URL: http://localhost:8001
+
+      - name: Run MPU-6050 e2e test
+        run: node test/backend/e2e/test_mpu6050_simulation.mjs --timeout=60
+        env:
+          BACKEND_URL: http://localhost:8001
