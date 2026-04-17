@@ -47,7 +47,7 @@ export const EditorPage: React.FC = () => {
   const canonicalUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : '/';
 
   useSEO({
-    title: 'Embedded Simulator Editor | Hardware Emulator',
+    title: 'Embedded Simulator Editor',
     description:
       'Write, compile, and simulate embedded projects in one browser-based editor.',
     url: canonicalUrl,
