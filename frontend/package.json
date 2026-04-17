@@ -1,6 +1,6 @@
 {
-  "name": "velxio",
-  "homepage": "https://velxio.dev",
+  "name": "embedded-simulator",
+  "homepage": "/",
   "private": true,
   "version": "2.0.1",
   "type": "module",

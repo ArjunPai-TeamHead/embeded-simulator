@@ -1,8 +1,8 @@
 {
-  "name": "Velxio — Arduino Emulator",
-  "short_name": "Velxio",
-  "description": "Free local Arduino emulator with real AVR8 CPU emulation, 48+ electronic components, Monaco Editor, and Serial Monitor. No cloud, no latency.",
-  "start_url": "/editor",
+  "name": "Embedded Simulator Editor",
+  "short_name": "Simulator",
+  "description": "Browser-based embedded simulator editor.",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "landscape",
@@ -45,7 +45,7 @@
       "src": "/og-image.svg",
       "sizes": "1200x630",
       "type": "image/svg+xml",
-      "label": "Velxio Arduino Emulator"
-    }
+        "label": "Embedded Simulator Editor"
+      }
   ]
 }
