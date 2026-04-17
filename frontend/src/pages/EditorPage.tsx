@@ -44,11 +44,13 @@ const resizeHandleStyle: React.CSSProperties = {
 };
 
 export const EditorPage: React.FC = () => {
+  const canonicalUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : '/';
+
   useSEO({
-    title: 'Embedded Simulator Editor',
+    title: 'Embedded Simulator Editor | Hardware Emulator',
     description:
       'Write, compile, and simulate embedded projects in one browser-based editor.',
-    url: '/',
+    url: canonicalUrl,
   });
 
   const [editorWidthPct, setEditorWidthPct] = useState(45);
