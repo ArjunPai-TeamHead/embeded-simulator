@@ -19,11 +19,8 @@ import { SerialMonitor } from '../components/simulator/SerialMonitor';
 import { Oscilloscope } from '../components/simulator/Oscilloscope';
 import { AppHeader } from '../components/layout/AppHeader';
 import { SaveProjectModal } from '../components/layout/SaveProjectModal';
-import { LoginPromptModal } from '../components/layout/LoginPromptModal';
-import { GitHubStarBanner } from '../components/layout/GitHubStarBanner';
 import { useSimulatorStore } from '../store/useSimulatorStore';
 import { useOscilloscopeStore } from '../store/useOscilloscopeStore';
-import { useAuthStore } from '../store/useAuthStore';
 import type { CompilationLog } from '../utils/compilationLogger';
 import '../App.css';
 
@@ -47,11 +44,13 @@ const resizeHandleStyle: React.CSSProperties = {
 };
 
 export const EditorPage: React.FC = () => {
+  const canonicalUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : '/';
+
   useSEO({
-    title: 'Multi-Board Simulator Editor — Arduino, ESP32, RP2040, RISC-V | Velxio',
+    title: 'Embedded Simulator Editor',
     description:
-      'Write, compile and simulate Arduino, ESP32, Raspberry Pi Pico, ESP32-C3, and Raspberry Pi 3 code in your browser. 19 boards, 5 CPU architectures, 48+ components. Free and open-source.',
-    url: 'https://velxio.dev/editor',
+      'Write, compile, and simulate embedded projects in one browser-based editor.',
+    url: canonicalUrl,
   });
 
   const [editorWidthPct, setEditorWidthPct] = useState(45);
@@ -68,61 +67,15 @@ export const EditorPage: React.FC = () => {
   const [compileLogs, setCompileLogs] = useState<CompilationLog[]>([]);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(BOTTOM_PANEL_DEFAULT);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
-  const [loginPromptOpen, setLoginPromptOpen] = useState(false);
-  const [showStarBanner, setShowStarBanner] = useState(false);
-
-  // ── GitHub star prompt (show once: 2nd visit OR after 3 min) ──────────────
-  useEffect(() => {
-    const STAR_KEY = 'velxio_star_prompted';
-    const VISITS_KEY = 'velxio_editor_visits';
-    const FIRST_VISIT_KEY = 'velxio_editor_first_visit';
-    const THREE_MIN = 3 * 60 * 1000;
-
-    if (localStorage.getItem(STAR_KEY)) return;
-
-    // Increment visit counter
-    const visits = parseInt(localStorage.getItem(VISITS_KEY) ?? '0', 10) + 1;
-    localStorage.setItem(VISITS_KEY, String(visits));
-
-    // Record timestamp of first visit
-    if (!localStorage.getItem(FIRST_VISIT_KEY)) {
-      localStorage.setItem(FIRST_VISIT_KEY, String(Date.now()));
-    }
-    const firstVisit = parseInt(localStorage.getItem(FIRST_VISIT_KEY)!, 10);
-
-    // Show immediately on second+ visit
-    if (visits >= 2) {
-      setShowStarBanner(true);
-      return;
-    }
-
-    // Otherwise schedule after the 3-minute mark
-    const elapsed = Date.now() - firstVisit;
-    const delay = Math.max(0, THREE_MIN - elapsed);
-    const timer = setTimeout(() => {
-      if (!localStorage.getItem(STAR_KEY)) setShowStarBanner(true);
-    }, delay);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleDismissStarBanner = () => {
-    localStorage.setItem('velxio_star_prompted', '1');
-    setShowStarBanner(false);
-  };
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches);
   // Default to 'code' on mobile — show the editor so users can write/view code
   const [mobileView, setMobileView] = useState<'code' | 'circuit'>('code');
-  const user = useAuthStore((s) => s.user);
 
   const handleSaveClick = useCallback(() => {
-    if (!user) {
-      setLoginPromptOpen(true);
-    } else {
-      setSaveModalOpen(true);
-    }
-  }, [user]);
+    setSaveModalOpen(true);
+  }, []);
 
   // Track mobile breakpoint
   useEffect(() => {
@@ -388,8 +341,6 @@ export const EditorPage: React.FC = () => {
       </div>
 
       {saveModalOpen && <SaveProjectModal onClose={() => setSaveModalOpen(false)} />}
-      {loginPromptOpen && <LoginPromptModal onClose={() => setLoginPromptOpen(false)} />}
-      {showStarBanner && <GitHubStarBanner onClose={handleDismissStarBanner} />}
     </div>
   );
 };
