@@ -1,4 +1,3 @@
-import { useLocation } from 'react-router-dom';
 import { useProjectStore } from '../../store/useProjectStore';
 import { ShareModal } from './ShareModal';
 import { useState } from 'react';
@@ -6,7 +5,6 @@ import { useState } from 'react';
 interface AppHeaderProps {}
 
 export const AppHeader: React.FC<AppHeaderProps> = () => {
-  const location = useLocation();
   const currentProject = useProjectStore((s) => s.currentProject);
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -25,7 +23,7 @@ export const AppHeader: React.FC<AppHeaderProps> = () => {
         </div>
 
         <div className="header-right">
-          {currentProject && location.pathname === '/' && (
+          {currentProject && (
             <button
               onClick={() => setShowShareModal(true)}
               style={{
